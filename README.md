@@ -5,7 +5,7 @@ No agent and no extra service on the Pi.
 
 ## Windows
 
-[Download PiLoad.exe](https://github.com/abb0r/piload/releases/latest/download/PiLoad.exe) (latest release)
+[Download PiLoad.exe](https://github.com/abb0r/piload/releases/download/v0.1.0/PiLoad.exe) (beta [v0.1.0](https://github.com/abb0r/piload/releases/tag/v0.1.0))
 
 ## Setup in the app
 
