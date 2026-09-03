@@ -1,41 +1,41 @@
 # PiLoad
 
-Windows-Programm, das **yt-dlp auf einem DietPi-Raspberry per SSH** startet.
-Kein Agent, kein Extra-Dienst auf dem Pi.
+Windows program that starts **yt-dlp on a DietPi Raspberry Pi over SSH**.
+No agent and no extra service on the Pi.
 
 ## Windows
 
-[PiLoad.exe herunterladen](https://github.com/abb0r/piload/releases/latest/download/PiLoad.exe) (Release [v1.0.0](https://github.com/abb0r/piload/releases/tag/v1.0.0))
+[Download PiLoad.exe](https://github.com/abb0r/piload/releases/latest/download/PiLoad.exe) (latest release)
 
-Oder lokal:
+Or run from source:
 
 ```powershell
 pip install -r desktop/requirements.txt
 python desktop/piload.py
 ```
 
-## Setup in der App
+## Setup in the app
 
-Unter **Setup** Host, Port `22`, Benutzer (`dietpi`) und Passwort oder Schlüssel eintragen.
-**Verbindung prüfen** führt remote `hostname` und `yt-dlp --version` aus.
+On the **Setup** tab enter host, port `22`, user (`dietpi`) and a password or key file.
+**Test connection** runs `hostname` and `yt-dlp --version` on the Pi.
 
-## yt-dlp auf DietPi
+## yt-dlp on DietPi
 
-yt-dlp über die DietPi-Softwareliste installieren: [dietpi.com/docs/software](https://dietpi.com/docs/software/)  
+Install yt-dlp from the DietPi software list: [dietpi.com/docs/software](https://dietpi.com/docs/software/)  
 (`dietpi-software` → Browse/Search → **yt-dlp**)
 
-Zusätzlich auf dem Pi:
+Also install ffmpeg on the Pi:
 
 ```bash
 sudo apt update
 sudo apt install -y ffmpeg
 ```
 
-Optional, für eingebettete Metadaten und Thumbnails:
+Optional, for embedded metadata and thumbnails:
 
 ```bash
 sudo apt install -y atomicparsley python3-mutagen
 ```
 
-SSH auf dem Pi muss erreichbar sein (DietPi: OpenSSH aktivieren).
-Der PC mit PiLoad.exe muss im selben LAN sein.
+SSH must be reachable on the Pi (enable OpenSSH in DietPi).
+The PC running PiLoad.exe must be on the same LAN.
