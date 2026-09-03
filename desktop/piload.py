@@ -22,7 +22,7 @@ import paramiko
 
 APP_DIR = Path(os.environ.get("APPDATA") or Path.home() / ".piload") / "PiLoad"
 SETTINGS = APP_DIR / "settings.json"
-VERSION = "0.1.4"
+VERSION = "0.1.5"
 REPO_URL = "https://github.com/abb0r/piload"
 
 PRESETS = {
