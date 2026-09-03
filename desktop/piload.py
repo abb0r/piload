@@ -11,6 +11,7 @@ import shlex
 import threading
 import time
 import uuid
+import webbrowser
 from pathlib import Path
 
 import customtkinter as ctk
@@ -18,6 +19,8 @@ import paramiko
 
 APP_DIR = Path(os.environ.get("APPDATA") or Path.home() / ".piload") / "PiLoad"
 SETTINGS = APP_DIR / "settings.json"
+VERSION = "0.1.1"
+REPO_URL = "https://github.com/abb0r/piload"
 
 PRESETS = {
     "best": [
@@ -147,6 +150,8 @@ def load_settings() -> dict:
         "output_dir": "/mnt/dietpi_userdata/downloads",
         "quality": "best",
         "playlist": False,
+        "save_password": False,
+        "password": "",
     }
     try:
         data = json.loads(SETTINGS.read_text(encoding="utf-8"))
@@ -267,18 +272,11 @@ class App(ctk.CTk):
         header.pack(fill="x")
         ctk.CTkLabel(
             header,
-            text="  Windows  ·  SSH  ·  DietPi",
-            text_color=MUTED,
-            font=ctk.CTkFont(size=12),
-            anchor="w",
-        ).pack(fill="x", padx=18, pady=(14, 0))
-        ctk.CTkLabel(
-            header,
             text="PiLoad",
             text_color=FG,
             font=ctk.CTkFont(size=32, weight="bold"),
             anchor="w",
-        ).pack(fill="x", padx=18, pady=(2, 16))
+        ).pack(fill="x", padx=18, pady=(18, 16))
 
         self.status = ctk.CTkLabel(self, text="SSH not tested", text_color=MUTED, anchor="w")
         self.status.pack(fill="x", padx=22, pady=(12, 0))
@@ -364,7 +362,13 @@ class App(ctk.CTk):
             row=8, column=0, sticky="w", pady=(8, 2)
         )
         self.pw = ctk.CTkEntry(grid, show="*", fg_color=BG, text_color=FG)
+        if self.settings.get("save_password") and self.settings.get("password"):
+            self.pw.insert(0, self.settings["password"])
         self.pw.grid(row=9, column=0, columnspan=2, sticky="ew")
+        self.save_pw = ctk.CTkCheckBox(grid, text="Save SSH password", text_color=MUTED)
+        if self.settings.get("save_password"):
+            self.save_pw.select()
+        self.save_pw.grid(row=10, column=0, sticky="w", pady=(8, 0))
         grid.grid_columnconfigure(0, weight=1)
         grid.grid_columnconfigure(1, weight=1)
 
@@ -382,6 +386,20 @@ class App(ctk.CTk):
             fg_color=ELEVATED,
             command=self.persist,
         ).pack(side="left", padx=8)
+
+        meta = ctk.CTkFrame(self.tab_s, fg_color="transparent")
+        meta.pack(side="bottom", fill="x", padx=12, pady=16)
+        ctk.CTkLabel(meta, text=f"Version {VERSION}", text_color=MUTED, anchor="w").pack(anchor="w")
+        link = ctk.CTkButton(
+            meta,
+            text=REPO_URL.replace("https://", ""),
+            fg_color="transparent",
+            hover_color=ELEVATED,
+            text_color=ACCENT,
+            anchor="w",
+            command=lambda: webbrowser.open(REPO_URL),
+        )
+        link.pack(anchor="w")
 
     def _labeled_entry(self, parent, label, value, row):
         ctk.CTkLabel(parent, text=label, text_color=MUTED, anchor="w").grid(
@@ -411,6 +429,8 @@ class App(ctk.CTk):
                 "output_dir": self.output.get().strip(),
                 "quality": self.quality,
                 "playlist": bool(self.playlist.get()),
+                "save_password": bool(self.save_pw.get()),
+                "password": self.pw.get() if self.save_pw.get() else "",
             }
         )
         save_settings(self.settings)
