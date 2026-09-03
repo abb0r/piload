@@ -1,0 +1,491 @@
+#!/usr/bin/env python3
+"""PiLoad — Windows GUI that runs yt-dlp on a DietPi box over SSH."""
+
+from __future__ import annotations
+
+import json
+import os
+import queue
+import re
+import shlex
+import threading
+import time
+import uuid
+from pathlib import Path
+
+import customtkinter as ctk
+import paramiko
+
+APP_DIR = Path(os.environ.get("APPDATA") or Path.home() / ".piload") / "PiLoad"
+SETTINGS = APP_DIR / "settings.json"
+
+PRESETS = {
+    "auto": [
+        "-f",
+        "bv*[height<=1080]+ba/b[height<=1080]/b",
+        "-S",
+        "res:1080,ext:mp4:m4a",
+        "--merge-output-format",
+        "mp4",
+    ],
+    "best": ["-f", "bv*+ba/b", "--merge-output-format", "mkv"],
+    "1080": ["-f", "bv*[height<=1080]+ba/b[height<=1080]", "--merge-output-format", "mp4"],
+    "720": ["-f", "bv*[height<=720]+ba/b[height<=720]", "--merge-output-format", "mp4"],
+    "audio": ["-f", "ba/b", "-x", "--audio-format", "mp3", "--audio-quality", "0"],
+}
+
+COMMON = [
+    "--embed-metadata",
+    "--embed-chapters",
+    "--embed-subs",
+    "--sub-langs",
+    "en.*,de.*,-live_chat",
+    "--write-auto-subs",
+    "--sponsorblock-mark",
+    "all",
+    "--concurrent-fragments",
+    "4",
+    "--no-mtime",
+    "--restrict-filenames",
+    "--newline",
+    "--no-warnings",
+]
+
+QUALITY_LABELS = [
+    ("auto", "Auto 1080p"),
+    ("best", "Beste Quelle"),
+    ("1080", "1080p"),
+    ("720", "720p"),
+    ("audio", "Nur Audio"),
+]
+
+BG = "#0c0d0f"
+SURFACE = "#15171b"
+ELEVATED = "#1c1f25"
+FG = "#eceef1"
+MUTED = "#9aa1ab"
+ACCENT = "#d7dde6"
+ACCENT_FG = "#0c0d0f"
+BORDER = "#2a2e36"
+OK = "#7d9b86"
+BAD = "#c07a72"
+
+
+def load_settings() -> dict:
+    defaults = {
+        "host": "192.168.1.42",
+        "port": "22",
+        "user": "dietpi",
+        "auth": "password",
+        "key_path": "",
+        "output_dir": "/mnt/dietpi_userdata/downloads",
+        "quality": "auto",
+        "playlist": False,
+    }
+    try:
+        data = json.loads(SETTINGS.read_text(encoding="utf-8"))
+        defaults.update({k: data[k] for k in defaults if k in data})
+    except (OSError, json.JSONDecodeError):
+        pass
+    return defaults
+
+
+def save_settings(data: dict) -> None:
+    APP_DIR.mkdir(parents=True, exist_ok=True)
+    SETTINGS.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+
+def build_command(url: str, quality: str, output_dir: str, playlist: bool) -> str:
+    out = output_dir.rstrip("/") + "/%(title)s [%(id)s].%(ext)s"
+    parts = ["yt-dlp", *PRESETS.get(quality, PRESETS["auto"]), *COMMON, "-o", out]
+    if not playlist:
+        parts.append("--no-playlist")
+    parts.append(url)
+    return " ".join(shlex.quote(p) for p in parts)
+
+
+class SshSession:
+    def __init__(self, cfg: dict, password: str = "") -> None:
+        self.cfg = cfg
+        self.password = password
+
+    def connect(self) -> paramiko.SSHClient:
+        client = paramiko.SSHClient()
+        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        kwargs = {
+            "hostname": self.cfg["host"].strip(),
+            "port": int(self.cfg["port"] or 22),
+            "username": self.cfg["user"].strip(),
+            "timeout": 12,
+            "allow_agent": False,
+            "look_for_keys": False,
+        }
+        if self.cfg.get("auth") == "key" and self.cfg.get("key_path"):
+            kwargs["key_filename"] = self.cfg["key_path"]
+        else:
+            kwargs["password"] = self.password
+        client.connect(**kwargs)
+        return client
+
+    def probe(self) -> str:
+        client = self.connect()
+        try:
+            _, stdout, stderr = client.exec_command(
+                "hostname; yt-dlp --version",
+                timeout=20,
+            )
+            out = stdout.read().decode("utf-8", "replace").strip()
+            err = stderr.read().decode("utf-8", "replace").strip()
+            if stdout.channel.recv_exit_status() != 0:
+                raise RuntimeError(err or "yt-dlp antwortet nicht")
+            return out.replace("\n", " · ")
+        finally:
+            client.close()
+
+    def run(self, command: str, on_line) -> int:
+        client = self.connect()
+        try:
+            _, stdout, stderr = client.exec_command(command, timeout=None)
+            stdout.channel.settimeout(1.0)
+            while True:
+                if stdout.channel.recv_ready() or stdout.channel.recv_stderr_ready():
+                    chunk = b""
+                    if stdout.channel.recv_ready():
+                        chunk += stdout.channel.recv(4096)
+                    if stdout.channel.recv_stderr_ready():
+                        chunk += stdout.channel.recv_stderr(4096)
+                    text = chunk.decode("utf-8", "replace")
+                    for line in text.splitlines():
+                        if line.strip():
+                            on_line(line.rstrip())
+                if stdout.channel.exit_status_ready():
+                    rest = stdout.read() + stderr.read()
+                    if rest:
+                        for line in rest.decode("utf-8", "replace").splitlines():
+                            if line.strip():
+                                on_line(line.rstrip())
+                    return stdout.channel.recv_exit_status()
+                time.sleep(0.08)
+        finally:
+            client.close()
+
+
+PROGRESS_RE = re.compile(r"(\d+(?:\.\d+)?)%")
+
+
+class App(ctk.CTk):
+    def __init__(self) -> None:
+        super().__init__()
+        self.title("PiLoad")
+        self.geometry("980x720")
+        self.minsize(820, 620)
+        ctk.set_appearance_mode("dark")
+        ctk.set_default_color_theme("dark-blue")
+        self.configure(fg_color=BG)
+
+        self.settings = load_settings()
+        self.password = ""
+        self.events: queue.Queue = queue.Queue()
+        self.jobs: list[dict] = []
+        self.quality = self.settings.get("quality", "auto")
+
+        self._build()
+        self.after(120, self._drain)
+
+    def _build(self) -> None:
+        header = ctk.CTkFrame(self, fg_color=SURFACE, corner_radius=0)
+        header.pack(fill="x")
+        ctk.CTkLabel(
+            header,
+            text="  Windows  ·  SSH  ·  DietPi",
+            text_color=MUTED,
+            font=ctk.CTkFont(size=12),
+            anchor="w",
+        ).pack(fill="x", padx=18, pady=(14, 0))
+        ctk.CTkLabel(
+            header,
+            text="PiLoad",
+            text_color=FG,
+            font=ctk.CTkFont(size=32, weight="bold"),
+            anchor="w",
+        ).pack(fill="x", padx=18, pady=(2, 16))
+
+        self.status = ctk.CTkLabel(self, text="SSH nicht geprüft", text_color=MUTED, anchor="w")
+        self.status.pack(fill="x", padx=22, pady=(12, 0))
+
+        self.tabs = ctk.CTkTabview(
+            self,
+            fg_color=SURFACE,
+            segmented_button_fg_color=ELEVATED,
+            segmented_button_selected_color=ACCENT,
+            segmented_button_selected_hover_color=ACCENT,
+            segmented_button_unselected_color=ELEVATED,
+            text_color=FG,
+            segmented_button_selected_text_color=ACCENT_FG,
+        )
+        self.tabs.pack(fill="both", expand=True, padx=18, pady=16)
+        self.tab_dl = self.tabs.add("Download")
+        self.tab_q = self.tabs.add("Warteschlange")
+        self.tab_s = self.tabs.add("Setup")
+        self._build_download()
+        self._build_queue()
+        self._build_setup()
+
+    def _build_download(self) -> None:
+        ctk.CTkLabel(self.tab_dl, text="Video-URL", text_color=MUTED, anchor="w").pack(
+            fill="x", padx=12, pady=(12, 4)
+        )
+        self.url = ctk.CTkTextbox(self.tab_dl, height=86, fg_color=BG, text_color=FG)
+        self.url.pack(fill="x", padx=12)
+
+        row = ctk.CTkFrame(self.tab_dl, fg_color="transparent")
+        row.pack(fill="x", padx=12, pady=12)
+        self.q_buttons = {}
+        for key, label in QUALITY_LABELS:
+            btn = ctk.CTkButton(
+                row,
+                text=label,
+                width=110,
+                fg_color=ELEVATED if key != self.quality else ACCENT,
+                text_color=FG if key != self.quality else ACCENT_FG,
+                command=lambda k=key: self._set_quality(k),
+            )
+            btn.pack(side="left", padx=4)
+            self.q_buttons[key] = btn
+
+        ctk.CTkLabel(self.tab_dl, text="Ordner auf dem Pi", text_color=MUTED, anchor="w").pack(
+            fill="x", padx=12, pady=(8, 4)
+        )
+        self.output = ctk.CTkEntry(self.tab_dl, fg_color=BG, text_color=FG)
+        self.output.insert(0, self.settings["output_dir"])
+        self.output.pack(fill="x", padx=12)
+
+        self.playlist = ctk.CTkCheckBox(self.tab_dl, text="Ganze Playlist laden", text_color=MUTED)
+        if self.settings.get("playlist"):
+            self.playlist.select()
+        self.playlist.pack(anchor="w", padx=12, pady=10)
+
+        self.notice = ctk.CTkLabel(self.tab_dl, text="", text_color=MUTED, anchor="w")
+        self.notice.pack(fill="x", padx=12)
+        ctk.CTkButton(
+            self.tab_dl,
+            text="Per SSH laden",
+            fg_color=ACCENT,
+            text_color=ACCENT_FG,
+            hover_color="#c4cad3",
+            command=self.start_download,
+        ).pack(anchor="e", padx=12, pady=12)
+
+    def _build_queue(self) -> None:
+        self.queue_box = ctk.CTkTextbox(self.tab_q, fg_color=BG, text_color=FG)
+        self.queue_box.pack(fill="both", expand=True, padx=12, pady=12)
+        self._render_jobs()
+
+    def _build_setup(self) -> None:
+        grid = ctk.CTkFrame(self.tab_s, fg_color="transparent")
+        grid.pack(fill="x", padx=12, pady=12)
+
+        self.host = self._labeled_entry(grid, "Host / IP", self.settings["host"], 0)
+        self.port = self._labeled_entry(grid, "SSH-Port", self.settings["port"], 1)
+        self.user = self._labeled_entry(grid, "Benutzer", self.settings["user"], 2)
+        self.key_path = self._labeled_entry(grid, "Schlüsseldatei (optional)", self.settings["key_path"], 3)
+
+        ctk.CTkLabel(grid, text="Passwort", text_color=MUTED, anchor="w").grid(
+            row=8, column=0, sticky="w", pady=(8, 2)
+        )
+        self.pw = ctk.CTkEntry(grid, show="*", fg_color=BG, text_color=FG)
+        self.pw.grid(row=9, column=0, columnspan=2, sticky="ew")
+        grid.grid_columnconfigure(0, weight=1)
+        grid.grid_columnconfigure(1, weight=1)
+
+        btns = ctk.CTkFrame(self.tab_s, fg_color="transparent")
+        btns.pack(fill="x", padx=12)
+        ctk.CTkButton(
+            btns,
+            text="Verbindung prüfen",
+            fg_color=ELEVATED,
+            command=self.test_connection,
+        ).pack(side="left")
+        ctk.CTkButton(
+            btns,
+            text="Einstellungen speichern",
+            fg_color=ELEVATED,
+            command=self.persist,
+        ).pack(side="left", padx=8)
+
+        help_txt = (
+            "yt-dlp auf DietPi installieren (einmal, per SSH auf dem Pi):\n\n"
+            "sudo apt update\n"
+            "sudo apt install -y ffmpeg\n"
+            "sudo curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp "
+            "-o /usr/local/bin/yt-dlp\n"
+            "sudo chmod a+rx /usr/local/bin/yt-dlp\n"
+            "sudo mkdir -p /mnt/dietpi_userdata/downloads\n"
+            "sudo chown dietpi:dietpi /mnt/dietpi_userdata/downloads\n"
+            "yt-dlp --version"
+        )
+        box = ctk.CTkTextbox(self.tab_s, fg_color=BG, text_color=MUTED)
+        box.pack(fill="both", expand=True, padx=12, pady=12)
+        box.insert("1.0", help_txt)
+        box.configure(state="disabled")
+
+    def _labeled_entry(self, parent, label, value, row):
+        ctk.CTkLabel(parent, text=label, text_color=MUTED, anchor="w").grid(
+            row=row * 2, column=0, sticky="w", pady=(8, 2)
+        )
+        entry = ctk.CTkEntry(parent, fg_color=BG, text_color=FG)
+        entry.insert(0, value)
+        entry.grid(row=row * 2 + 1, column=0, columnspan=2, sticky="ew")
+        return entry
+
+    def _set_quality(self, key: str) -> None:
+        self.quality = key
+        for k, btn in self.q_buttons.items():
+            if k == key:
+                btn.configure(fg_color=ACCENT, text_color=ACCENT_FG)
+            else:
+                btn.configure(fg_color=ELEVATED, text_color=FG)
+
+    def persist(self) -> None:
+        self.settings.update(
+            {
+                "host": self.host.get().strip(),
+                "port": self.port.get().strip() or "22",
+                "user": self.user.get().strip(),
+                "auth": "key" if self.key_path.get().strip() else "password",
+                "key_path": self.key_path.get().strip(),
+                "output_dir": self.output.get().strip(),
+                "quality": self.quality,
+                "playlist": bool(self.playlist.get()),
+            }
+        )
+        save_settings(self.settings)
+        self.status.configure(text="Einstellungen gespeichert", text_color=OK)
+
+    def _cfg(self) -> dict:
+        self.password = self.pw.get()
+        return {
+            "host": self.host.get().strip(),
+            "port": self.port.get().strip() or "22",
+            "user": self.user.get().strip(),
+            "auth": "key" if self.key_path.get().strip() else "password",
+            "key_path": self.key_path.get().strip(),
+        }
+
+    def test_connection(self) -> None:
+        self.status.configure(text="SSH wird geprüft …", text_color=MUTED)
+
+        def work():
+            try:
+                detail = SshSession(self._cfg(), self.pw.get()).probe()
+                self.events.put(("status", "ok", detail))
+            except Exception as exc:
+                self.events.put(("status", "fail", str(exc)))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def start_download(self) -> None:
+        url = self.url.get("1.0", "end").strip()
+        if not url:
+            self.notice.configure(text="Bitte eine Video-URL einfügen.")
+            return
+        if not self.host.get().strip() or not self.user.get().strip():
+            self.notice.configure(text="SSH-Daten fehlen — siehe Setup.")
+            self.tabs.set("Setup")
+            return
+        self.persist()
+        job = {
+            "id": uuid.uuid4().hex[:8],
+            "url": url,
+            "status": "running",
+            "progress": 0,
+            "log": [],
+        }
+        self.jobs.insert(0, job)
+        self._render_jobs()
+        self.tabs.set("Warteschlange")
+        cmd = build_command(url, self.quality, self.output.get().strip(), bool(self.playlist.get()))
+        job["log"].append(cmd)
+
+        def work():
+            def on_line(line: str):
+                self.events.put(("line", job["id"], line))
+
+            try:
+                code = SshSession(self._cfg(), self.pw.get()).run(cmd, on_line)
+                self.events.put(("done", job["id"], code))
+            except Exception as exc:
+                self.events.put(("error", job["id"], str(exc)))
+
+        threading.Thread(target=work, daemon=True).start()
+        self.url.delete("1.0", "end")
+        self.notice.configure(text="Auftrag per SSH gestartet.")
+
+    def _job(self, job_id: str):
+        for job in self.jobs:
+            if job["id"] == job_id:
+                return job
+        return None
+
+    def _render_jobs(self) -> None:
+        lines = []
+        if not self.jobs:
+            lines.append("Keine Aufträge.\nSobald ein Download per SSH läuft, steht der Fortschritt hier.")
+        for job in self.jobs:
+            lines.append(f"[{job['status']}] {job['progress']}%  {job['url']}")
+            lines.extend("    " + item for item in job["log"][-8:])
+            lines.append("")
+        self.queue_box.configure(state="normal")
+        self.queue_box.delete("1.0", "end")
+        self.queue_box.insert("1.0", "\n".join(lines))
+        self.queue_box.configure(state="disabled")
+
+    def _drain(self) -> None:
+        changed = False
+        try:
+            while True:
+                item = self.events.get_nowait()
+                kind = item[0]
+                if kind == "status":
+                    _, state, detail = item
+                    color = OK if state == "ok" else BAD
+                    prefix = "verbunden" if state == "ok" else "Fehler"
+                    self.status.configure(text=f"{prefix}: {detail}", text_color=color)
+                elif kind == "line":
+                    _, job_id, line = item
+                    job = self._job(job_id)
+                    if job:
+                        job["log"].append(line[:240])
+                        job["log"] = job["log"][-40:]
+                        found = PROGRESS_RE.search(line)
+                        if found:
+                            job["progress"] = min(99, int(float(found.group(1))))
+                        changed = True
+                elif kind == "done":
+                    _, job_id, code = item
+                    job = self._job(job_id)
+                    if job:
+                        job["status"] = "done" if code == 0 else "error"
+                        job["progress"] = 100 if code == 0 else job["progress"]
+                        job["log"].append("fertig" if code == 0 else f"yt-dlp exit {code}")
+                        changed = True
+                elif kind == "error":
+                    _, job_id, message = item
+                    job = self._job(job_id)
+                    if job:
+                        job["status"] = "error"
+                        job["log"].append(message)
+                        changed = True
+        except queue.Empty:
+            pass
+        if changed:
+            self._render_jobs()
+        self.after(120, self._drain)
+
+
+def main() -> None:
+    App().mainloop()
+
+
+if __name__ == "__main__":
+    main()
