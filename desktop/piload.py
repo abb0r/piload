@@ -8,6 +8,7 @@ import os
 import queue
 import re
 import shlex
+import sys
 import threading
 import time
 import uuid
@@ -21,7 +22,7 @@ import paramiko
 
 APP_DIR = Path(os.environ.get("APPDATA") or Path.home() / ".piload") / "PiLoad"
 SETTINGS = APP_DIR / "settings.json"
-VERSION = "0.1.2"
+VERSION = "0.1.3"
 REPO_URL = "https://github.com/abb0r/piload"
 
 PRESETS = {
@@ -140,6 +141,20 @@ class HoverTip:
         if self.tip is not None:
             self.tip.destroy()
             self.tip = None
+
+
+def app_icon_path() -> Path | None:
+    candidates = []
+    if getattr(sys, "frozen", False):
+        meipass = Path(getattr(sys, "_MEIPASS", ""))
+        candidates.append(meipass / "piload.ico")
+        candidates.append(Path(sys.executable).with_name("piload.ico"))
+    here = Path(__file__).resolve().parent
+    candidates.append(here / "piload.ico")
+    for path in candidates:
+        if path.is_file():
+            return path
+    return None
 
 
 def load_settings() -> dict:
@@ -296,6 +311,12 @@ class App(ctk.CTk):
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("dark-blue")
         self.configure(fg_color=BG)
+        icon = app_icon_path()
+        if icon is not None:
+            try:
+                self.iconbitmap(str(icon))
+            except Exception:
+                pass
 
         self.settings = load_settings()
         self.password = ""
