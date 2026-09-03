@@ -1,18 +1,11 @@
 # PiLoad
 
 Windows program that starts **yt-dlp on a DietPi Raspberry Pi over SSH**.
-No agent and no extra service on the Pi.
 
 ## Windows
 
 [Download PiLoad.exe](https://github.com/abb0r/piload/releases/latest/download/PiLoad.exe) (latest release)
 
-Or run from source:
-
-```powershell
-pip install -r desktop/requirements.txt
-python desktop/piload.py
-```
 
 ## Setup in the app
 
