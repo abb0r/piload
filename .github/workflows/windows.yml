@@ -19,7 +19,7 @@ jobs:
           pip install -r desktop/requirements.txt pyinstaller
       - name: Build PiLoad.exe
         run: |
-          pyinstaller --noconfirm --windowed --onefile --name PiLoad desktop/piload.py
+          pyinstaller --noconfirm --windowed --onefile --name PiLoad --icon desktop/piload.ico --add-data "desktop/piload.ico;." desktop/piload.py
       - uses: actions/upload-artifact@v4
         with:
           name: PiLoad-windows
