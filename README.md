@@ -8,6 +8,8 @@ Windows program that starts **yt-dlp on a DietPi Raspberry Pi over SSH**.
 
 [Download PiLoad.exe](https://github.com/abb0r/piload/releases/latest/download/PiLoad.exe)
 
+Windows Defender may flag the unsigned `.exe` (heuristic `Wacatac`). That is a known false positive for PyInstaller builds. Allow the file if you downloaded it from this repository.
+
 ## Setup in the app
 
 On the **Setup** tab enter host, port `22`, user (`dietpi`) and a password or key file.
