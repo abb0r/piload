@@ -17,10 +17,11 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r desktop/requirements.txt pyinstaller
-      - name: Build PiLoad.exe
+      - name: Build PiLoad
         run: |
-          pyinstaller --noconfirm --windowed --onefile --noupx --name PiLoad --icon desktop/piload.ico --version-file desktop/file_version.txt --add-data "desktop/piload.ico;." desktop/piload.py
+          pyinstaller --noconfirm --windowed --onedir --noupx --name PiLoad --icon desktop/piload.ico --version-file desktop/file_version.txt --add-data "desktop/piload.ico;." desktop/piload.py
+          Compress-Archive -Path dist\PiLoad -DestinationPath dist\PiLoad-windows.zip
       - uses: actions/upload-artifact@v4
         with:
           name: PiLoad-windows
-          path: dist/PiLoad.exe
+          path: dist/PiLoad-windows.zip
