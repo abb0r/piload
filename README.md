@@ -7,13 +7,6 @@ No agent and no extra service on the Pi.
 
 [Download PiLoad.exe](https://github.com/abb0r/piload/releases/latest/download/PiLoad.exe) (latest release)
 
-Or run from source:
-
-```powershell
-pip install -r desktop/requirements.txt
-python desktop/piload.py
-```
-
 ## Setup in the app
 
 On the **Setup** tab enter host, port `22`, user (`dietpi`) and a password or key file.
