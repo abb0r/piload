@@ -2,6 +2,8 @@
 
 Windows program that starts **yt-dlp on a DietPi Raspberry Pi over SSH**.
 
+![PiLoad](docs/piload.png)
+
 ## Windows
 
 [Download PiLoad.exe](https://github.com/abb0r/piload/releases/latest/download/PiLoad.exe)
