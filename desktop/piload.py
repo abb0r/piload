@@ -11,6 +11,8 @@ import shlex
 import threading
 import time
 import uuid
+import urllib.error
+import urllib.request
 import webbrowser
 from pathlib import Path
 
@@ -19,7 +21,7 @@ import paramiko
 
 APP_DIR = Path(os.environ.get("APPDATA") or Path.home() / ".piload") / "PiLoad"
 SETTINGS = APP_DIR / "settings.json"
-VERSION = "0.1.1"
+VERSION = "0.1.2"
 REPO_URL = "https://github.com/abb0r/piload"
 
 PRESETS = {
@@ -168,6 +170,22 @@ def save_settings(data: dict) -> None:
     SETTINGS.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
 
+def version_key(value: str) -> tuple:
+    nums = [int(part) for part in re.split(r"[^\d]+", value) if part]
+    return tuple(nums) if nums else (0,)
+
+
+def latest_ytdlp_release() -> str:
+    req = urllib.request.Request(
+        "https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest",
+        headers={"User-Agent": f"PiLoad/{VERSION}", "Accept": "application/vnd.github+json"},
+    )
+    with urllib.request.urlopen(req, timeout=12) as resp:
+        data = json.loads(resp.read().decode("utf-8"))
+    tag = str(data.get("tag_name") or "").strip()
+    return tag[1:] if tag.lower().startswith("v") else tag
+
+
 def build_command(url: str, quality: str, output_dir: str, playlist: bool) -> str:
     out = output_dir.rstrip("/") + "/%(title)s [%(id)s].%(ext)s"
     parts = ["yt-dlp", *PRESETS.get(quality, PRESETS["best"]), *COMMON, "-o", out]
@@ -212,6 +230,29 @@ class SshSession:
             if stdout.channel.recv_exit_status() != 0:
                 raise RuntimeError(err or "yt-dlp did not respond")
             return out.replace("\n", " · ")
+        finally:
+            client.close()
+
+    def ytdlp_version(self) -> str:
+        client = self.connect()
+        try:
+            _, stdout, stderr = client.exec_command("yt-dlp --version", timeout=20)
+            out = stdout.read().decode("utf-8", "replace").strip()
+            err = stderr.read().decode("utf-8", "replace").strip()
+            if stdout.channel.recv_exit_status() != 0 or not out:
+                raise RuntimeError(err or "yt-dlp did not respond")
+            return out.split()[0]
+        finally:
+            client.close()
+
+    def update_ytdlp(self) -> str:
+        client = self.connect()
+        try:
+            _, stdout, stderr = client.exec_command("yt-dlp -U", timeout=180)
+            out = stdout.read().decode("utf-8", "replace").strip()
+            err = stderr.read().decode("utf-8", "replace").strip()
+            text = "\n".join(part for part in (out, err) if part).strip()
+            return text or "yt-dlp update finished"
         finally:
             client.close()
 
@@ -263,6 +304,7 @@ class App(ctk.CTk):
         self.quality = self.settings.get("quality", "best")
         if self.quality not in PRESETS:
             self.quality = "best"
+        self._ytdlp_checked = False
 
         self._build()
         self.after(120, self._drain)
@@ -270,13 +312,20 @@ class App(ctk.CTk):
     def _build(self) -> None:
         header = ctk.CTkFrame(self, fg_color=SURFACE, corner_radius=0)
         header.pack(fill="x")
+        title_row = ctk.CTkFrame(header, fg_color="transparent")
+        title_row.pack(fill="x", padx=18, pady=(18, 16))
         ctk.CTkLabel(
-            header,
+            title_row,
             text="PiLoad",
             text_color=FG,
             font=ctk.CTkFont(size=32, weight="bold"),
-            anchor="w",
-        ).pack(fill="x", padx=18, pady=(18, 16))
+        ).pack(side="left")
+        ctk.CTkLabel(
+            title_row,
+            text=VERSION,
+            text_color=MUTED,
+            font=ctk.CTkFont(size=14),
+        ).pack(side="left", padx=(10, 0), pady=(14, 0))
 
         self.status = ctk.CTkLabel(self, text="SSH not tested", text_color=MUTED, anchor="w")
         self.status.pack(fill="x", padx=22, pady=(12, 0))
@@ -458,6 +507,22 @@ class App(ctk.CTk):
 
         threading.Thread(target=work, daemon=True).start()
 
+    def _check_ytdlp(self, cfg: dict, password: str) -> str:
+        session = SshSession(cfg, password)
+        installed = session.ytdlp_version()
+        try:
+            latest = latest_ytdlp_release()
+        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError) as exc:
+            return f"yt-dlp {installed} (could not check GitHub: {exc})"
+        if latest and version_key(installed) >= version_key(latest):
+            return f"yt-dlp {installed} is current"
+        update = session.update_ytdlp()
+        try:
+            installed = session.ytdlp_version()
+        except Exception:
+            pass
+        return f"yt-dlp update {installed}: {update.splitlines()[-1][:180]}"
+
     def start_download(self) -> None:
         raw = self.url.get("1.0", "end")
         urls = [line.strip() for line in raw.splitlines() if line.strip()]
@@ -494,6 +559,14 @@ class App(ctk.CTk):
         )
 
         def work():
+            if not self._ytdlp_checked:
+                self.events.put(("status", "ok", "Checking yt-dlp version…"))
+                try:
+                    detail = self._check_ytdlp(cfg, password)
+                    self.events.put(("status", "ok", detail))
+                except Exception as exc:
+                    self.events.put(("status", "fail", f"yt-dlp check failed: {exc}"))
+                self._ytdlp_checked = True
             for job in batch:
                 self.events.put(("start", job["id"]))
                 cmd = build_command(job["url"], quality, output_dir, playlist)
