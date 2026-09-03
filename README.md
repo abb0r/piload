@@ -1,7 +1,6 @@
 # PiLoad
 
 Windows program that starts **yt-dlp on a DietPi Raspberry Pi over SSH**.
-No agent and no extra service on the Pi.
 
 ## Windows
 
