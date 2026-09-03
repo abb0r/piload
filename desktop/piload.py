@@ -231,10 +231,10 @@ class App(ctk.CTk):
         self._build_setup()
 
     def _build_download(self) -> None:
-        ctk.CTkLabel(self.tab_dl, text="Video URL", text_color=MUTED, anchor="w").pack(
+        ctk.CTkLabel(self.tab_dl, text="Video URLs (one per line)", text_color=MUTED, anchor="w").pack(
             fill="x", padx=12, pady=(12, 4)
         )
-        self.url = ctk.CTkTextbox(self.tab_dl, height=86, fg_color=BG, text_color=FG)
+        self.url = ctk.CTkTextbox(self.tab_dl, height=120, fg_color=BG, text_color=FG)
         self.url.pack(fill="x", padx=12)
 
         row = ctk.CTkFrame(self.tab_dl, fg_color="transparent")
@@ -312,21 +312,6 @@ class App(ctk.CTk):
             command=self.persist,
         ).pack(side="left", padx=8)
 
-        help_txt = (
-            "Install yt-dlp from the DietPi software list:\n"
-            "https://dietpi.com/docs/software/\n"
-            "(dietpi-software → Browse/Search → yt-dlp)\n\n"
-            "Also install ffmpeg:\n"
-            "sudo apt update\n"
-            "sudo apt install -y ffmpeg\n\n"
-            "Optional, for embedded metadata and thumbnails:\n"
-            "sudo apt install -y atomicparsley python3-mutagen"
-        )
-        box = ctk.CTkTextbox(self.tab_s, fg_color=BG, text_color=MUTED)
-        box.pack(fill="both", expand=True, padx=12, pady=12)
-        box.insert("1.0", help_txt)
-        box.configure(state="disabled")
-
     def _labeled_entry(self, parent, label, value, row):
         ctk.CTkLabel(parent, text=label, text_color=MUTED, anchor="w").grid(
             row=row * 2, column=0, sticky="w", pady=(8, 2)
@@ -383,41 +368,56 @@ class App(ctk.CTk):
         threading.Thread(target=work, daemon=True).start()
 
     def start_download(self) -> None:
-        url = self.url.get("1.0", "end").strip()
-        if not url:
-            self.notice.configure(text="Please paste a video URL.")
+        raw = self.url.get("1.0", "end")
+        urls = [line.strip() for line in raw.splitlines() if line.strip()]
+        if not urls:
+            self.notice.configure(text="Please paste at least one video URL.")
             return
         if not self.host.get().strip() or not self.user.get().strip():
             self.notice.configure(text="SSH details missing — see Setup.")
             self.tabs.set("Setup")
             return
         self.persist()
-        job = {
-            "id": uuid.uuid4().hex[:8],
-            "url": url,
-            "status": "running",
-            "progress": 0,
-            "log": [],
-        }
-        self.jobs.insert(0, job)
+        quality = self.quality
+        output_dir = self.output.get().strip()
+        playlist = bool(self.playlist.get())
+        cfg = self._cfg()
+        password = self.pw.get()
+        batch = []
+        for index, url in enumerate(urls):
+            job = {
+                "id": uuid.uuid4().hex[:8],
+                "url": url,
+                "status": "queued" if index else "running",
+                "progress": 0,
+                "log": [],
+            }
+            self.jobs.insert(0, job)
+            batch.append(job)
         self._render_jobs()
         self.tabs.set("Queue")
-        cmd = build_command(url, self.quality, self.output.get().strip(), bool(self.playlist.get()))
-        job["log"].append(cmd)
+        self.url.delete("1.0", "end")
+        count = len(batch)
+        self.notice.configure(
+            text=f"{count} job started over SSH." if count == 1 else f"{count} jobs started over SSH."
+        )
 
         def work():
-            def on_line(line: str):
-                self.events.put(("line", job["id"], line))
+            for job in batch:
+                self.events.put(("start", job["id"]))
+                cmd = build_command(job["url"], quality, output_dir, playlist)
+                self.events.put(("line", job["id"], cmd))
 
-            try:
-                code = SshSession(self._cfg(), self.pw.get()).run(cmd, on_line)
-                self.events.put(("done", job["id"], code))
-            except Exception as exc:
-                self.events.put(("error", job["id"], str(exc)))
+                def on_line(line: str, job_id=job["id"]):
+                    self.events.put(("line", job_id, line))
+
+                try:
+                    code = SshSession(cfg, password).run(cmd, on_line)
+                    self.events.put(("done", job["id"], code))
+                except Exception as exc:
+                    self.events.put(("error", job["id"], str(exc)))
 
         threading.Thread(target=work, daemon=True).start()
-        self.url.delete("1.0", "end")
-        self.notice.configure(text="Job started over SSH.")
 
     def _job(self, job_id: str):
         for job in self.jobs:
@@ -449,6 +449,12 @@ class App(ctk.CTk):
                     color = OK if state == "ok" else BAD
                     prefix = "connected" if state == "ok" else "error"
                     self.status.configure(text=f"{prefix}: {detail}", text_color=color)
+                elif kind == "start":
+                    _, job_id = item
+                    job = self._job(job_id)
+                    if job:
+                        job["status"] = "running"
+                        changed = True
                 elif kind == "line":
                     _, job_id, line = item
                     job = self._job(job_id)
