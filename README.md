@@ -21,17 +21,20 @@ Unter **Setup** Host, Port `22`, Benutzer (`dietpi`) und Passwort oder Schlüsse
 
 ## yt-dlp auf DietPi
 
-Nur das — einmal per SSH auf dem Pi:
+yt-dlp über die DietPi-Softwareliste installieren: [dietpi.com/docs/software](https://dietpi.com/docs/software/)  
+(`dietpi-software` → Browse/Search → **yt-dlp**)
+
+Zusätzlich auf dem Pi:
 
 ```bash
 sudo apt update
 sudo apt install -y ffmpeg
-sudo curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp \
-  -o /usr/local/bin/yt-dlp
-sudo chmod a+rx /usr/local/bin/yt-dlp
-sudo mkdir -p /mnt/dietpi_userdata/downloads
-sudo chown dietpi:dietpi /mnt/dietpi_userdata/downloads
-yt-dlp --version
+```
+
+Optional, für eingebettete Metadaten und Thumbnails:
+
+```bash
+sudo apt install -y atomicparsley python3-mutagen
 ```
 
 SSH auf dem Pi muss erreichbar sein (DietPi: OpenSSH aktivieren).
