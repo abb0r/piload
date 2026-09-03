@@ -20,17 +20,30 @@ APP_DIR = Path(os.environ.get("APPDATA") or Path.home() / ".piload") / "PiLoad"
 SETTINGS = APP_DIR / "settings.json"
 
 PRESETS = {
-    "auto": [
+    "best": [
         "-f",
-        "bv*[height<=1080]+ba/b[height<=1080]/b",
+        "bv*+ba/b",
         "-S",
-        "res:1080,ext:mp4:m4a",
+        "res,vcodec:h264,acodec:m4a,ext:mp4:m4a",
         "--merge-output-format",
         "mp4",
     ],
-    "best": ["-f", "bv*+ba/b", "--merge-output-format", "mkv"],
-    "1080": ["-f", "bv*[height<=1080]+ba/b[height<=1080]", "--merge-output-format", "mp4"],
-    "720": ["-f", "bv*[height<=720]+ba/b[height<=720]", "--merge-output-format", "mp4"],
+    "1080": [
+        "-f",
+        "bv*[height<=1080]+ba/b[height<=1080]/b",
+        "-S",
+        "res:1080,vcodec:h264,acodec:m4a,ext:mp4:m4a",
+        "--merge-output-format",
+        "mp4",
+    ],
+    "720": [
+        "-f",
+        "bv*[height<=720]+ba/b[height<=720]/b",
+        "-S",
+        "res:720,vcodec:h264,acodec:m4a,ext:mp4:m4a",
+        "--merge-output-format",
+        "mp4",
+    ],
     "audio": ["-f", "ba/b", "-x", "--audio-format", "mp3", "--audio-quality", "0"],
 }
 
@@ -51,12 +64,31 @@ COMMON = [
     "--no-warnings",
 ]
 
-QUALITY_LABELS = [
-    ("auto", "Auto 1080p"),
-    ("best", "Best source"),
-    ("1080", "1080p"),
-    ("720", "720p"),
-    ("audio", "Audio only"),
+QUALITY_PROFILES = [
+    (
+        "best",
+        "Best Quality",
+        "Highest available video and audio, merged to MP4.\n"
+        "Prefers H.264 + AAC so the file plays widely without recoding.",
+    ),
+    (
+        "1080",
+        "1080p",
+        "Best video up to 1080p plus best audio, merged to MP4.\n"
+        "Prefers H.264 + AAC. Higher resolutions are ignored.",
+    ),
+    (
+        "720",
+        "720p",
+        "Best video up to 720p plus best audio, merged to MP4.\n"
+        "Prefers H.264 + AAC. Higher resolutions are ignored.",
+    ),
+    (
+        "audio",
+        "Audio only",
+        "Best audio track only, converted to MP3 at maximum quality.\n"
+        "No video is downloaded.",
+    ),
 ]
 
 BG = "#0c0d0f"
@@ -71,6 +103,40 @@ OK = "#7d9b86"
 BAD = "#c07a72"
 
 
+class HoverTip:
+    def __init__(self, widget, text: str) -> None:
+        self.widget = widget
+        self.text = text
+        self.tip = None
+        widget.bind("<Enter>", self._show)
+        widget.bind("<Leave>", self._hide)
+
+    def _show(self, _event=None) -> None:
+        if self.tip is not None:
+            return
+        self.tip = ctk.CTkToplevel(self.widget)
+        self.tip.overrideredirect(True)
+        self.tip.attributes("-topmost", True)
+        self.tip.configure(fg_color=ELEVATED)
+        ctk.CTkLabel(
+            self.tip,
+            text=self.text,
+            text_color=FG,
+            justify="left",
+            wraplength=340,
+            font=ctk.CTkFont(size=13),
+        ).pack(padx=12, pady=10)
+        self.tip.update_idletasks()
+        x = self.widget.winfo_rootx()
+        y = self.widget.winfo_rooty() + self.widget.winfo_height() + 8
+        self.tip.geometry(f"+{x}+{y}")
+
+    def _hide(self, _event=None) -> None:
+        if self.tip is not None:
+            self.tip.destroy()
+            self.tip = None
+
+
 def load_settings() -> dict:
     defaults = {
         "host": "192.168.1.42",
@@ -79,12 +145,14 @@ def load_settings() -> dict:
         "auth": "password",
         "key_path": "",
         "output_dir": "/mnt/dietpi_userdata/downloads",
-        "quality": "auto",
+        "quality": "best",
         "playlist": False,
     }
     try:
         data = json.loads(SETTINGS.read_text(encoding="utf-8"))
         defaults.update({k: data[k] for k in defaults if k in data})
+        if defaults.get("quality") not in PRESETS:
+            defaults["quality"] = "best"
     except (OSError, json.JSONDecodeError):
         pass
     return defaults
@@ -97,7 +165,7 @@ def save_settings(data: dict) -> None:
 
 def build_command(url: str, quality: str, output_dir: str, playlist: bool) -> str:
     out = output_dir.rstrip("/") + "/%(title)s [%(id)s].%(ext)s"
-    parts = ["yt-dlp", *PRESETS.get(quality, PRESETS["auto"]), *COMMON, "-o", out]
+    parts = ["yt-dlp", *PRESETS.get(quality, PRESETS["best"]), *COMMON, "-o", out]
     if not playlist:
         parts.append("--no-playlist")
     parts.append(url)
@@ -187,7 +255,9 @@ class App(ctk.CTk):
         self.password = ""
         self.events: queue.Queue = queue.Queue()
         self.jobs: list[dict] = []
-        self.quality = self.settings.get("quality", "auto")
+        self.quality = self.settings.get("quality", "best")
+        if self.quality not in PRESETS:
+            self.quality = "best"
 
         self._build()
         self.after(120, self._drain)
@@ -240,16 +310,17 @@ class App(ctk.CTk):
         row = ctk.CTkFrame(self.tab_dl, fg_color="transparent")
         row.pack(fill="x", padx=12, pady=12)
         self.q_buttons = {}
-        for key, label in QUALITY_LABELS:
+        for key, label, tip in QUALITY_PROFILES:
             btn = ctk.CTkButton(
                 row,
                 text=label,
-                width=110,
+                width=128,
                 fg_color=ELEVATED if key != self.quality else ACCENT,
                 text_color=FG if key != self.quality else ACCENT_FG,
                 command=lambda k=key: self._set_quality(k),
             )
             btn.pack(side="left", padx=4)
+            HoverTip(btn, tip)
             self.q_buttons[key] = btn
 
         ctk.CTkLabel(self.tab_dl, text="Folder on the Pi", text_color=MUTED, anchor="w").pack(
