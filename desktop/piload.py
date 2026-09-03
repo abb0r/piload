@@ -53,10 +53,10 @@ COMMON = [
 
 QUALITY_LABELS = [
     ("auto", "Auto 1080p"),
-    ("best", "Beste Quelle"),
+    ("best", "Best source"),
     ("1080", "1080p"),
     ("720", "720p"),
-    ("audio", "Nur Audio"),
+    ("audio", "Audio only"),
 ]
 
 BG = "#0c0d0f"
@@ -137,7 +137,7 @@ class SshSession:
             out = stdout.read().decode("utf-8", "replace").strip()
             err = stderr.read().decode("utf-8", "replace").strip()
             if stdout.channel.recv_exit_status() != 0:
-                raise RuntimeError(err or "yt-dlp antwortet nicht")
+                raise RuntimeError(err or "yt-dlp did not respond")
             return out.replace("\n", " · ")
         finally:
             client.close()
@@ -210,7 +210,7 @@ class App(ctk.CTk):
             anchor="w",
         ).pack(fill="x", padx=18, pady=(2, 16))
 
-        self.status = ctk.CTkLabel(self, text="SSH nicht geprüft", text_color=MUTED, anchor="w")
+        self.status = ctk.CTkLabel(self, text="SSH not tested", text_color=MUTED, anchor="w")
         self.status.pack(fill="x", padx=22, pady=(12, 0))
 
         self.tabs = ctk.CTkTabview(
@@ -224,14 +224,14 @@ class App(ctk.CTk):
         )
         self.tabs.pack(fill="both", expand=True, padx=18, pady=16)
         self.tab_dl = self.tabs.add("Download")
-        self.tab_q = self.tabs.add("Warteschlange")
+        self.tab_q = self.tabs.add("Queue")
         self.tab_s = self.tabs.add("Setup")
         self._build_download()
         self._build_queue()
         self._build_setup()
 
     def _build_download(self) -> None:
-        ctk.CTkLabel(self.tab_dl, text="Video-URL", text_color=MUTED, anchor="w").pack(
+        ctk.CTkLabel(self.tab_dl, text="Video URL", text_color=MUTED, anchor="w").pack(
             fill="x", padx=12, pady=(12, 4)
         )
         self.url = ctk.CTkTextbox(self.tab_dl, height=86, fg_color=BG, text_color=FG)
@@ -252,14 +252,14 @@ class App(ctk.CTk):
             btn.pack(side="left", padx=4)
             self.q_buttons[key] = btn
 
-        ctk.CTkLabel(self.tab_dl, text="Ordner auf dem Pi", text_color=MUTED, anchor="w").pack(
+        ctk.CTkLabel(self.tab_dl, text="Folder on the Pi", text_color=MUTED, anchor="w").pack(
             fill="x", padx=12, pady=(8, 4)
         )
         self.output = ctk.CTkEntry(self.tab_dl, fg_color=BG, text_color=FG)
         self.output.insert(0, self.settings["output_dir"])
         self.output.pack(fill="x", padx=12)
 
-        self.playlist = ctk.CTkCheckBox(self.tab_dl, text="Ganze Playlist laden", text_color=MUTED)
+        self.playlist = ctk.CTkCheckBox(self.tab_dl, text="Download entire playlist", text_color=MUTED)
         if self.settings.get("playlist"):
             self.playlist.select()
         self.playlist.pack(anchor="w", padx=12, pady=10)
@@ -268,7 +268,7 @@ class App(ctk.CTk):
         self.notice.pack(fill="x", padx=12)
         ctk.CTkButton(
             self.tab_dl,
-            text="Per SSH laden",
+            text="Download via SSH",
             fg_color=ACCENT,
             text_color=ACCENT_FG,
             hover_color="#c4cad3",
@@ -285,11 +285,11 @@ class App(ctk.CTk):
         grid.pack(fill="x", padx=12, pady=12)
 
         self.host = self._labeled_entry(grid, "Host / IP", self.settings["host"], 0)
-        self.port = self._labeled_entry(grid, "SSH-Port", self.settings["port"], 1)
-        self.user = self._labeled_entry(grid, "Benutzer", self.settings["user"], 2)
-        self.key_path = self._labeled_entry(grid, "Schlüsseldatei (optional)", self.settings["key_path"], 3)
+        self.port = self._labeled_entry(grid, "SSH port", self.settings["port"], 1)
+        self.user = self._labeled_entry(grid, "User", self.settings["user"], 2)
+        self.key_path = self._labeled_entry(grid, "Key file (optional)", self.settings["key_path"], 3)
 
-        ctk.CTkLabel(grid, text="Passwort", text_color=MUTED, anchor="w").grid(
+        ctk.CTkLabel(grid, text="Password", text_color=MUTED, anchor="w").grid(
             row=8, column=0, sticky="w", pady=(8, 2)
         )
         self.pw = ctk.CTkEntry(grid, show="*", fg_color=BG, text_color=FG)
@@ -301,27 +301,26 @@ class App(ctk.CTk):
         btns.pack(fill="x", padx=12)
         ctk.CTkButton(
             btns,
-            text="Verbindung prüfen",
+            text="Test connection",
             fg_color=ELEVATED,
             command=self.test_connection,
         ).pack(side="left")
         ctk.CTkButton(
             btns,
-            text="Einstellungen speichern",
+            text="Save settings",
             fg_color=ELEVATED,
             command=self.persist,
         ).pack(side="left", padx=8)
 
         help_txt = (
-            "yt-dlp auf DietPi installieren (einmal, per SSH auf dem Pi):\n\n"
+            "Install yt-dlp from the DietPi software list:\n"
+            "https://dietpi.com/docs/software/\n"
+            "(dietpi-software → Browse/Search → yt-dlp)\n\n"
+            "Also install ffmpeg:\n"
             "sudo apt update\n"
-            "sudo apt install -y ffmpeg\n"
-            "sudo curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp "
-            "-o /usr/local/bin/yt-dlp\n"
-            "sudo chmod a+rx /usr/local/bin/yt-dlp\n"
-            "sudo mkdir -p /mnt/dietpi_userdata/downloads\n"
-            "sudo chown dietpi:dietpi /mnt/dietpi_userdata/downloads\n"
-            "yt-dlp --version"
+            "sudo apt install -y ffmpeg\n\n"
+            "Optional, for embedded metadata and thumbnails:\n"
+            "sudo apt install -y atomicparsley python3-mutagen"
         )
         box = ctk.CTkTextbox(self.tab_s, fg_color=BG, text_color=MUTED)
         box.pack(fill="both", expand=True, padx=12, pady=12)
@@ -359,7 +358,7 @@ class App(ctk.CTk):
             }
         )
         save_settings(self.settings)
-        self.status.configure(text="Einstellungen gespeichert", text_color=OK)
+        self.status.configure(text="Settings saved", text_color=OK)
 
     def _cfg(self) -> dict:
         self.password = self.pw.get()
@@ -372,7 +371,7 @@ class App(ctk.CTk):
         }
 
     def test_connection(self) -> None:
-        self.status.configure(text="SSH wird geprüft …", text_color=MUTED)
+        self.status.configure(text="Testing SSH…", text_color=MUTED)
 
         def work():
             try:
@@ -386,10 +385,10 @@ class App(ctk.CTk):
     def start_download(self) -> None:
         url = self.url.get("1.0", "end").strip()
         if not url:
-            self.notice.configure(text="Bitte eine Video-URL einfügen.")
+            self.notice.configure(text="Please paste a video URL.")
             return
         if not self.host.get().strip() or not self.user.get().strip():
-            self.notice.configure(text="SSH-Daten fehlen — siehe Setup.")
+            self.notice.configure(text="SSH details missing — see Setup.")
             self.tabs.set("Setup")
             return
         self.persist()
@@ -402,7 +401,7 @@ class App(ctk.CTk):
         }
         self.jobs.insert(0, job)
         self._render_jobs()
-        self.tabs.set("Warteschlange")
+        self.tabs.set("Queue")
         cmd = build_command(url, self.quality, self.output.get().strip(), bool(self.playlist.get()))
         job["log"].append(cmd)
 
@@ -418,7 +417,7 @@ class App(ctk.CTk):
 
         threading.Thread(target=work, daemon=True).start()
         self.url.delete("1.0", "end")
-        self.notice.configure(text="Auftrag per SSH gestartet.")
+        self.notice.configure(text="Job started over SSH.")
 
     def _job(self, job_id: str):
         for job in self.jobs:
@@ -429,7 +428,7 @@ class App(ctk.CTk):
     def _render_jobs(self) -> None:
         lines = []
         if not self.jobs:
-            lines.append("Keine Aufträge.\nSobald ein Download per SSH läuft, steht der Fortschritt hier.")
+            lines.append("No jobs yet.\nProgress appears here once a download is running over SSH.")
         for job in self.jobs:
             lines.append(f"[{job['status']}] {job['progress']}%  {job['url']}")
             lines.extend("    " + item for item in job["log"][-8:])
@@ -448,7 +447,7 @@ class App(ctk.CTk):
                 if kind == "status":
                     _, state, detail = item
                     color = OK if state == "ok" else BAD
-                    prefix = "verbunden" if state == "ok" else "Fehler"
+                    prefix = "connected" if state == "ok" else "error"
                     self.status.configure(text=f"{prefix}: {detail}", text_color=color)
                 elif kind == "line":
                     _, job_id, line = item
@@ -466,7 +465,7 @@ class App(ctk.CTk):
                     if job:
                         job["status"] = "done" if code == 0 else "error"
                         job["progress"] = 100 if code == 0 else job["progress"]
-                        job["log"].append("fertig" if code == 0 else f"yt-dlp exit {code}")
+                        job["log"].append("finished" if code == 0 else f"yt-dlp exit {code}")
                         changed = True
                 elif kind == "error":
                     _, job_id, message = item
