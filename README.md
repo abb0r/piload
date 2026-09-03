@@ -5,19 +5,13 @@ Kein Agent, kein Extra-Dienst auf dem Pi.
 
 ## Windows
 
-1. [PiLoad.exe](https://github.com/abb0r/piload/actions) aus dem neuesten erfolgreichen Workflow-Lauf unter Artifacts laden (`PiLoad-windows`).
-2. Oder lokal:
+[PiLoad.exe herunterladen](https://github.com/abb0r/piload/releases/latest/download/PiLoad.exe) (Release [v1.0.0](https://github.com/abb0r/piload/releases/tag/v1.0.0))
+
+Oder lokal:
 
 ```powershell
 pip install -r desktop/requirements.txt
 python desktop/piload.py
-```
-
-Exe selbst bauen:
-
-```powershell
-pip install -r desktop/requirements.txt pyinstaller
-pyinstaller --windowed --onefile --name PiLoad desktop/piload.py
 ```
 
 ## Setup in der App
