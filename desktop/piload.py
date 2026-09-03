@@ -217,11 +217,10 @@ class App(ctk.CTk):
             self,
             fg_color=SURFACE,
             segmented_button_fg_color=ELEVATED,
-            segmented_button_selected_color=ACCENT,
-            segmented_button_selected_hover_color=ACCENT,
+            segmented_button_selected_color="#3a4048",
+            segmented_button_selected_hover_color="#454c56",
             segmented_button_unselected_color=ELEVATED,
             text_color=FG,
-            segmented_button_selected_text_color=ACCENT_FG,
         )
         self.tabs.pack(fill="both", expand=True, padx=18, pady=16)
         self.tab_dl = self.tabs.add("Download")
