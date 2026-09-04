@@ -256,27 +256,19 @@ func applyDarwinDMG(dmg string) error {
 	if err := exec.Command("ditto", srcApp, dstApp).Run(); err != nil {
 		return fmt.Errorf("could not install PiLoad.app: %w", err)
 	}
-	bin := filepath.Join(dstApp, "Contents", "MacOS")
-	entries, _ := os.ReadDir(bin)
-	restart := filepath.Join(dstApp)
-	if len(entries) > 0 {
-		restart = filepath.Join(bin, entries[0].Name())
-	}
 	cmd := exec.Command("open", dstApp)
 	if err := cmd.Start(); err != nil {
-		cmd = exec.Command(restart)
-		if err := cmd.Start(); err != nil {
-			return fmt.Errorf("app installed but restart failed: %w", err)
-		}
+		return fmt.Errorf("app installed but restart failed: %w", err)
 	}
 	return nil
 }
 
 func hostFlatpak(args ...string) *exec.Cmd {
 	if os.Getenv("FLATPAK_ID") != "" {
-		return exec.Command(append([]string{"flatpak-spawn", "--host", "flatpak"}, args...)...)
+		all := append([]string{"--host", "flatpak"}, args...)
+		return exec.Command("flatpak-spawn", all...)
 	}
-	return exec.Command(append([]string{"flatpak"}, args...)...)
+	return exec.Command("flatpak", args...)
 }
 
 func applyLinuxFlatpak(bundle string) error {
