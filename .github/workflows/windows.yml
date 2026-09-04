@@ -10,18 +10,21 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-go@v5
         with:
-          python-version: "3.12"
-      - name: Install
+          go-version: "1.24"
+      - name: MinGW
+        run: choco install mingw -y --no-progress
+      - name: Build PiLoad.exe
+        shell: bash
         run: |
-          python -m pip install --upgrade pip
-          pip install -r desktop/requirements.txt pyinstaller
-      - name: Build PiLoad
-        run: |
-          pyinstaller --noconfirm --windowed --onedir --noupx --name PiLoad --icon desktop/piload.ico --version-file desktop/file_version.txt --hidden-import PIL --hidden-import PIL.Image --collect-all PIL --add-data "desktop/piload.ico;." --add-data "desktop/piload.png;." desktop/piload.py
-          Compress-Archive -Path dist\PiLoad -DestinationPath dist\PiLoad-windows.zip
+          export PATH="/c/ProgramData/mingw64/mingw64/bin:/c/mingw64/bin:$PATH"
+          go version
+          gcc --version
+          go install github.com/akavel/rsrc@latest
+          "$(go env GOPATH)/bin/rsrc" -ico desktop/piload.ico -o cmd/piload/rsrc_windows.syso
+          go build -trimpath -ldflags="-s -w -H windowsgui -X main.Version=0.2.0" -o PiLoad.exe ./cmd/piload
       - uses: actions/upload-artifact@v4
         with:
           name: PiLoad-windows
-          path: dist/PiLoad-windows.zip
+          path: PiLoad.exe
