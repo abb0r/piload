@@ -22,7 +22,7 @@ import (
 var iconPNG []byte
 
 // Version is set at build time with -X main.Version=0.2.1
-var Version = "0.2.4"
+var Version = "0.2.5"
 
 const repoURL = "https://github.com/abb0r/piload"
 
@@ -56,6 +56,7 @@ type ui struct {
 }
 
 func main() {
+	cleanupOldBinary()
 	a := app.NewWithID("com.abb0r.piload")
 	a.Settings().SetTheme(theme.DarkTheme())
 	if res := fyne.NewStaticResource("icon.png", iconPNG); res != nil {
@@ -504,17 +505,30 @@ func (u *ui) checkAppUpdate() {
 			if !ok {
 				return
 			}
-			u.status.SetText("Downloading update…")
+			bar := widget.NewProgressBar()
+			label := widget.NewLabel("Downloading update…")
+			prog := dialog.NewCustomWithoutButtons("Updating PiLoad", container.NewVBox(label, bar), u.win)
+			prog.Show()
 			go func() {
-				err := applyUpdate(exeURL)
+				err := applyUpdate(exeURL, func(got, total int64) {
+					fyne.Do(func() {
+						if total > 0 {
+							bar.SetValue(float64(got) / float64(total))
+							label.SetText(fmt.Sprintf("Downloading update… %.0f%%", 100*float64(got)/float64(total)))
+						} else {
+							label.SetText(fmt.Sprintf("Downloading update… %d KB", got/1024))
+						}
+					})
+				})
 				fyne.Do(func() {
+					prog.Hide()
 					if err != nil {
 						u.status.SetText("Update failed: " + err.Error())
 						dialog.ShowError(err, u.win)
 						return
 					}
-					u.status.SetText("Update downloaded. PiLoad will restart.")
-					time.Sleep(400 * time.Millisecond)
+					u.status.SetText("Update installed. Restarting…")
+					time.Sleep(250 * time.Millisecond)
 					u.win.Close()
 					os.Exit(0)
 				})

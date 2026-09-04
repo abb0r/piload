@@ -57,23 +57,59 @@ func latestAppRelease() (tag, exeURL, notes string, err error) {
 	return tag, "", notes, fmt.Errorf("no PiLoad.exe in latest release")
 }
 
-func applyUpdate(exeURL string) error {
+func cleanupOldBinary() {
+	self, err := os.Executable()
+	if err != nil {
+		return
+	}
+	dir := filepath.Dir(self)
+	_ = os.Remove(self + ".old")
+	_ = os.Remove(filepath.Join(dir, "PiLoad.exe.old"))
+	_ = os.Remove(filepath.Join(dir, "PiLoad.exe.new"))
+	_ = os.Remove(filepath.Join(dir, "piload-update.bat"))
+}
+
+type progressReader struct {
+	r     io.Reader
+	got   int64
+	total int64
+	last  time.Time
+	cb    func(got, total int64)
+}
+
+func (p *progressReader) Read(b []byte) (int, error) {
+	n, err := p.r.Read(b)
+	if n > 0 {
+		p.got += int64(n)
+		if p.cb != nil && (err != nil || time.Since(p.last) > 80*time.Millisecond) {
+			p.last = time.Now()
+			p.cb(p.got, p.total)
+		}
+	}
+	if err != nil && p.cb != nil {
+		p.cb(p.got, p.total)
+	}
+	return n, err
+}
+
+func applyUpdate(exeURL string, progress func(got, total int64)) error {
 	self, err := os.Executable()
 	if err != nil {
 		return err
 	}
-	self, err = filepath.EvalSymlinks(self)
-	if err != nil {
-		self, _ = os.Executable()
+	if resolved, err := filepath.EvalSymlinks(self); err == nil {
+		self = resolved
 	}
 	dir := filepath.Dir(self)
 	tmp := filepath.Join(dir, "PiLoad.exe.new")
+	old := self + ".old"
+
 	req, err := http.NewRequest(http.MethodGet, exeURL, nil)
 	if err != nil {
 		return err
 	}
 	req.Header.Set("User-Agent", "PiLoad/"+Version)
-	resp, err := (&http.Client{Timeout: 3 * time.Minute}).Do(req)
+	resp, err := (&http.Client{Timeout: 5 * time.Minute}).Do(req)
 	if err != nil {
 		return err
 	}
@@ -81,24 +117,41 @@ func applyUpdate(exeURL string) error {
 	if resp.StatusCode >= 400 {
 		return fmt.Errorf("download failed: %s", resp.Status)
 	}
+
 	out, err := os.Create(tmp)
 	if err != nil {
 		return err
 	}
-	if _, err := io.Copy(out, resp.Body); err != nil {
-		out.Close()
+	src := &progressReader{r: resp.Body, total: resp.ContentLength, cb: progress}
+	_, copyErr := io.Copy(out, src)
+	closeErr := out.Close()
+	if copyErr != nil {
 		_ = os.Remove(tmp)
-		return err
+		return copyErr
 	}
-	if err := out.Close(); err != nil {
-		return err
+	if closeErr != nil {
+		_ = os.Remove(tmp)
+		return closeErr
 	}
-	bat := filepath.Join(dir, "piload-update.bat")
-	script := fmt.Sprintf("ping 127.0.0.1 -n 2 >nul\r\nmove /y \"%s\" \"%s\"\r\nstart \"\" \"%s\"\r\ndel \"%%~f0\"\r\n", tmp, self, self)
-	if err := os.WriteFile(bat, []byte(script), 0o700); err != nil {
-		return err
+
+	_ = os.Remove(old)
+	if err := os.Rename(self, old); err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("could not replace running app: %w", err)
 	}
-	cmd := exec.Command("cmd", "/C", "start", "", bat)
+	if err := os.Rename(tmp, self); err != nil {
+		_ = os.Rename(old, self)
+		return fmt.Errorf("could not install update: %w", err)
+	}
+
+	cmd := exec.Command(self)
 	cmd.Dir = dir
-	return cmd.Start()
+	cmd.Stdin = nil
+	cmd.Stdout = nil
+	cmd.Stderr = nil
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("update installed but restart failed: %w", err)
+	}
+	return nil
 }
+
