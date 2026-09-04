@@ -7,10 +7,21 @@ Windows, Linux and macOS (Apple Silicon) program that starts **yt-dlp on a DietP
 ## Download
 
 - [Windows](https://github.com/abb0r/piload/releases/latest/download/PiLoad.exe)
-- [Linux](https://github.com/abb0r/piload/releases/latest/download/PiLoad-linux-amd64)
-- [macOS Apple Silicon](https://github.com/abb0r/piload/releases/latest/download/PiLoad-macos-arm64)
+- [Linux Flatpak](https://github.com/abb0r/piload/releases/latest/download/PiLoad-linux-x86_64.flatpak)
+- [macOS Apple Silicon](https://github.com/abb0r/piload/releases/latest/download/PiLoad-macos-arm64.dmg)
 
 On startup PiLoad checks GitHub for a newer release and asks before updating.
+
+### Linux
+
+```bash
+flatpak install --user PiLoad-linux-x86_64.flatpak
+flatpak run com.abb0r.PiLoad
+```
+
+### macOS
+
+Open the `.dmg` and drag **PiLoad.app** to Applications.
 
 ## Settings in the app
 
@@ -36,4 +47,4 @@ sudo apt install -y atomicparsley python3-mutagen
 ```
 
 SSH must be reachable on the Pi (enable OpenSSH in DietPi).
-The PC running PiLoad.exe must be on the same LAN.
+The computer running PiLoad must be on the same LAN.

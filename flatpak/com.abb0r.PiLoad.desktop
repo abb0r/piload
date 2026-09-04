@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=PiLoad
+Comment=Start yt-dlp on a DietPi Raspberry Pi over SSH
+Exec=piload
+Icon=com.abb0r.PiLoad
+Terminal=false
+Type=Application
+Categories=Network;AudioVideo;
+StartupNotify=true

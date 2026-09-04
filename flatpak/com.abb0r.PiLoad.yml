@@ -1,0 +1,29 @@
+app-id: com.abb0r.PiLoad
+runtime: org.freedesktop.Platform
+runtime-version: '24.08'
+sdk: org.freedesktop.Sdk
+command: piload
+finish-args:
+  - --share=network
+  - --share=ipc
+  - --socket=fallback-x11
+  - --socket=wayland
+  - --device=dri
+  - --filesystem=home
+modules:
+  - name: piload
+    buildsystem: simple
+    build-commands:
+      - install -D piload /app/bin/piload
+      - install -D com.abb0r.PiLoad.desktop /app/share/applications/com.abb0r.PiLoad.desktop
+      - install -D com.abb0r.PiLoad.metainfo.xml /app/share/metainfo/com.abb0r.PiLoad.metainfo.xml
+      - install -D icon.png /app/share/icons/hicolor/256x256/apps/com.abb0r.PiLoad.png
+    sources:
+      - type: file
+        path: piload
+      - type: file
+        path: com.abb0r.PiLoad.desktop
+      - type: file
+        path: com.abb0r.PiLoad.metainfo.xml
+      - type: file
+        path: icon.png

@@ -13,7 +13,10 @@ import (
 	"time"
 )
 
-const repoAPI = "https://api.github.com/repos/abb0r/piload/releases/latest"
+const (
+	repoAPI      = "https://api.github.com/repos/abb0r/piload/releases/latest"
+	flatpakAppID = "com.abb0r.PiLoad"
+)
 
 type ghRelease struct {
 	Tag  string `json:"tag_name"`
@@ -64,9 +67,9 @@ func releaseAssetName() string {
 	case "windows":
 		return "PiLoad.exe"
 	case "darwin":
-		return "PiLoad-macos-arm64"
+		return "PiLoad-macos-arm64.dmg"
 	default:
-		return "PiLoad-linux-amd64"
+		return "PiLoad-linux-x86_64.flatpak"
 	}
 }
 
@@ -105,7 +108,62 @@ func (p *progressReader) Read(b []byte) (int, error) {
 	return n, err
 }
 
-func applyUpdate(exeURL string, progress func(got, total int64)) error {
+func applyUpdate(fileURL string, progress func(got, total int64)) error {
+	tmp, err := downloadUpdate(fileURL, progress)
+	if err != nil {
+		return err
+	}
+	switch runtime.GOOS {
+	case "windows":
+		return applyWindowsUpdate(tmp)
+	case "darwin":
+		return applyDarwinDMG(tmp)
+	default:
+		return applyLinuxFlatpak(tmp)
+	}
+}
+
+func downloadUpdate(fileURL string, progress func(got, total int64)) (string, error) {
+	req, err := http.NewRequest(http.MethodGet, fileURL, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("User-Agent", "PiLoad/"+Version)
+	resp, err := (&http.Client{Timeout: 5 * time.Minute}).Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return "", fmt.Errorf("download failed: %s", resp.Status)
+	}
+	dir := os.TempDir()
+	if home, err := os.UserHomeDir(); err == nil {
+		dl := filepath.Join(home, "Downloads")
+		if st, err := os.Stat(dl); err == nil && st.IsDir() {
+			dir = dl
+		}
+	}
+	tmp := filepath.Join(dir, releaseAssetName())
+	out, err := os.Create(tmp)
+	if err != nil {
+		return "", err
+	}
+	src := &progressReader{r: resp.Body, total: resp.ContentLength, cb: progress}
+	_, copyErr := io.Copy(out, src)
+	closeErr := out.Close()
+	if copyErr != nil {
+		_ = os.Remove(tmp)
+		return "", copyErr
+	}
+	if closeErr != nil {
+		_ = os.Remove(tmp)
+		return "", closeErr
+	}
+	return tmp, nil
+}
+
+func applyWindowsUpdate(tmp string) error {
 	self, err := os.Executable()
 	if err != nil {
 		return err
@@ -114,57 +172,123 @@ func applyUpdate(exeURL string, progress func(got, total int64)) error {
 		self = resolved
 	}
 	dir := filepath.Dir(self)
-	tmp := self + ".new"
 	old := self + ".old"
-
-	req, err := http.NewRequest(http.MethodGet, exeURL, nil)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("User-Agent", "PiLoad/"+Version)
-	resp, err := (&http.Client{Timeout: 5 * time.Minute}).Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 400 {
-		return fmt.Errorf("download failed: %s", resp.Status)
-	}
-
-	out, err := os.Create(tmp)
-	if err != nil {
-		return err
-	}
-	src := &progressReader{r: resp.Body, total: resp.ContentLength, cb: progress}
-	_, copyErr := io.Copy(out, src)
-	closeErr := out.Close()
-	if copyErr != nil {
-		_ = os.Remove(tmp)
-		return copyErr
-	}
-	if closeErr != nil {
-		_ = os.Remove(tmp)
-		return closeErr
-	}
-
 	_ = os.Remove(old)
 	if err := os.Rename(self, old); err != nil {
-		_ = os.Remove(tmp)
 		return fmt.Errorf("could not replace running app: %w", err)
 	}
 	if err := os.Rename(tmp, self); err != nil {
-		_ = os.Rename(old, self)
-		return fmt.Errorf("could not install update: %w", err)
+		_ = copyFile(tmp, self)
+		if _, statErr := os.Stat(self); statErr != nil {
+			_ = os.Rename(old, self)
+			return fmt.Errorf("could not install update: %w", err)
+		}
 	}
-
 	cmd := exec.Command(self)
 	cmd.Dir = dir
-	cmd.Stdin = nil
-	cmd.Stdout = nil
-	cmd.Stderr = nil
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = nil, nil, nil
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("update installed but restart failed: %w", err)
 	}
 	return nil
 }
 
+func copyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+	_, err = io.Copy(out, in)
+	return err
+}
+
+func darwinBundlePath(self string) string {
+	const marker = ".app/Contents/MacOS/"
+	i := strings.Index(self, marker)
+	if i < 0 {
+		return ""
+	}
+	return self[:i+4]
+}
+
+func applyDarwinDMG(dmg string) error {
+	out, err := exec.Command("hdiutil", "attach", "-nobrowse", "-readonly", dmg).CombinedOutput()
+	if err != nil {
+		_ = exec.Command("open", dmg).Start()
+		return fmt.Errorf("could not open disk image: %s", strings.TrimSpace(string(out)))
+	}
+	mount := ""
+	for _, line := range strings.Split(string(out), "\n") {
+		if i := strings.Index(line, "/Volumes/"); i >= 0 {
+			mount = strings.TrimSpace(line[i:])
+			break
+		}
+	}
+	if mount == "" {
+		_ = exec.Command("open", dmg).Start()
+		return fmt.Errorf("disk image attached but no volume found")
+	}
+	defer func() { _ = exec.Command("hdiutil", "detach", mount, "-quiet").Run() }()
+
+	matches, _ := filepath.Glob(filepath.Join(mount, "*.app"))
+	if len(matches) == 0 {
+		_ = exec.Command("open", dmg).Start()
+		return fmt.Errorf("no .app found in the disk image")
+	}
+	srcApp := matches[0]
+
+	self, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	dstApp := darwinBundlePath(self)
+	if dstApp == "" {
+		home, _ := os.UserHomeDir()
+		dstApp = filepath.Join(home, "Applications", "PiLoad.app")
+	}
+	_ = os.MkdirAll(filepath.Dir(dstApp), 0o755)
+	if err := exec.Command("ditto", srcApp, dstApp).Run(); err != nil {
+		return fmt.Errorf("could not install PiLoad.app: %w", err)
+	}
+	bin := filepath.Join(dstApp, "Contents", "MacOS")
+	entries, _ := os.ReadDir(bin)
+	restart := filepath.Join(dstApp)
+	if len(entries) > 0 {
+		restart = filepath.Join(bin, entries[0].Name())
+	}
+	cmd := exec.Command("open", dstApp)
+	if err := cmd.Start(); err != nil {
+		cmd = exec.Command(restart)
+		if err := cmd.Start(); err != nil {
+			return fmt.Errorf("app installed but restart failed: %w", err)
+		}
+	}
+	return nil
+}
+
+func hostFlatpak(args ...string) *exec.Cmd {
+	if os.Getenv("FLATPAK_ID") != "" {
+		return exec.Command(append([]string{"flatpak-spawn", "--host", "flatpak"}, args...)...)
+	}
+	return exec.Command(append([]string{"flatpak"}, args...)...)
+}
+
+func applyLinuxFlatpak(bundle string) error {
+	cmd := hostFlatpak("install", "--user", "--or-update", "--noninteractive", bundle)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("flatpak install failed: %s\n%s", err, strings.TrimSpace(string(out)))
+	}
+	run := hostFlatpak("run", flatpakAppID)
+	run.Stdin, run.Stdout, run.Stderr = nil, nil, nil
+	if err := run.Start(); err != nil {
+		return fmt.Errorf("flatpak installed but restart failed: %w", err)
+	}
+	return nil
+}

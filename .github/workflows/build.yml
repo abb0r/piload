@@ -5,6 +5,12 @@ on:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
+env:
+  APP_VERSION: "0.3.1"
+
 jobs:
   windows:
     runs-on: windows-latest
@@ -21,7 +27,7 @@ jobs:
           export PATH="/c/ProgramData/mingw64/mingw64/bin:/c/mingw64/bin:$PATH"
           go install github.com/akavel/rsrc@latest
           "$(go env GOPATH)/bin/rsrc" -ico desktop/piload.ico -o cmd/piload/rsrc_windows.syso
-          go build -trimpath -ldflags="-s -w -H windowsgui -X main.Version=0.3.0" -o PiLoad.exe ./cmd/piload
+          go build -trimpath -ldflags="-s -w -H windowsgui -X main.Version=${APP_VERSION}" -o PiLoad.exe ./cmd/piload
       - uses: actions/upload-artifact@v4
         with:
           name: PiLoad-windows
@@ -35,13 +41,22 @@ jobs:
         with:
           go-version: "1.24"
       - name: Deps
-        run: sudo apt-get update && sudo apt-get install -y gcc libgl1-mesa-dev xorg-dev libxkbcommon-dev
-      - name: Build
-        run: go build -trimpath -ldflags="-s -w -X main.Version=0.3.0" -o PiLoad-linux-amd64 ./cmd/piload
+        run: sudo apt-get update && sudo apt-get install -y gcc libgl1-mesa-dev xorg-dev libxkbcommon-dev flatpak flatpak-builder
+      - name: Build binary
+        run: go build -trimpath -ldflags="-s -w -X main.Version=${APP_VERSION}" -o piload ./cmd/piload
+      - name: Flatpak bundle
+        run: |
+          sudo flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+          sudo flatpak install -y flathub org.freedesktop.Platform//24.08 org.freedesktop.Sdk//24.08
+          cp piload flatpak/piload
+          cp cmd/piload/icon.png flatpak/icon.png
+          chmod +x flatpak/piload
+          flatpak-builder --force-clean --repo=flatpak-repo flatpak-build flatpak/com.abb0r.PiLoad.yml
+          flatpak build-bundle flatpak-repo PiLoad-linux-x86_64.flatpak com.abb0r.PiLoad
       - uses: actions/upload-artifact@v4
         with:
           name: PiLoad-linux
-          path: PiLoad-linux-amd64
+          path: PiLoad-linux-x86_64.flatpak
 
   macos:
     runs-on: macos-latest
@@ -50,11 +65,57 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.24"
-      - name: Build
+      - name: Build app and DMG
         run: |
           go env GOARCH
-          CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags="-s -w -X main.Version=0.3.0" -o PiLoad-macos-arm64 ./cmd/piload
+          go install fyne.io/tools/cmd/fyne@latest
+          export PATH="$(go env GOPATH)/bin:$PATH"
+          CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 fyne package -os darwin \
+            -name PiLoad \
+            -appID com.abb0r.piload \
+            -appVersion "${APP_VERSION}" \
+            -appBuild 1 \
+            -icon cmd/piload/icon.png \
+            -release \
+            -src ./cmd/piload
+          test -d PiLoad.app
+          mkdir -p dmgroot
+          cp -R PiLoad.app dmgroot/
+          ln -s /Applications dmgroot/Applications
+          hdiutil create -volname PiLoad -srcfolder dmgroot -ov -format UDZO PiLoad-macos-arm64.dmg
       - uses: actions/upload-artifact@v4
         with:
           name: PiLoad-macos
-          path: PiLoad-macos-arm64
+          path: PiLoad-macos-arm64.dmg
+
+  release:
+    needs: [windows, linux, macos]
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="v${APP_VERSION}"
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $TAG already exists"
+            exit 0
+          fi
+          gh release create "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target main \
+            --title "PiLoad ${APP_VERSION}" \
+            --notes "$(cat <<'EOF'
+          Linux is now a Flatpak. macOS is a signed-style .app inside a disk image.
+
+          - Windows: `PiLoad.exe`
+          - Linux: `PiLoad-linux-x86_64.flatpak` — install with `flatpak install --user PiLoad-linux-x86_64.flatpak`
+          - macOS Apple Silicon: `PiLoad-macos-arm64.dmg` — open the image and drag PiLoad.app to Applications
+          EOF
+          )" \
+            --latest \
+            PiLoad-windows/PiLoad.exe \
+            PiLoad-linux/PiLoad-linux-x86_64.flatpak \
+            PiLoad-macos/PiLoad-macos-arm64.dmg
