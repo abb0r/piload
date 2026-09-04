@@ -22,7 +22,7 @@ import (
 var iconPNG []byte
 
 // Version is set at build time with -X main.Version=0.2.1
-var Version = "0.2.2"
+var Version = "0.2.3"
 
 const repoURL = "https://github.com/abb0r/piload"
 
@@ -44,6 +44,7 @@ type ui struct {
 	queueScroll                                    *container.Scroll
 	urls                                           *widget.Entry
 	host, port, user, keyPath, password, outputDir *widget.Entry
+	extractors                                     *widget.Entry
 	savePW, playlist, autoUpdate                   *widget.Check
 	qualityBtns                                    map[string]*widget.Button
 	tabs                                           *container.AppTabs
@@ -112,6 +113,10 @@ func (u *ui) build(cfg Settings) {
 		u.persist()
 	})
 	u.autoUpdate.SetChecked(cfg.AutoUpdate)
+	u.extractors = widget.NewMultiLineEntry()
+	u.extractors.Wrapping = fyne.TextWrapWord
+	u.extractors.SetPlaceHolder("Load the list from the Pi with the button below.")
+	u.extractors.Disable()
 	u.setProfileTip()
 }
 
@@ -128,7 +133,7 @@ func (u *ui) layout() fyne.CanvasObject {
 	u.tabs = container.NewAppTabs(
 		container.NewTabItem("Download", u.downloadTab()),
 		container.NewTabItem("Queue", container.NewBorder(nil, nil, nil, nil, u.queueScroll)),
-		container.NewTabItem("Setup", u.setupTab()),
+		container.NewTabItem("Settings", u.setupTab()),
 	)
 	u.tabQueue = u.tabs.Items[1]
 	u.tabSetup = u.tabs.Items[2]
@@ -172,15 +177,22 @@ func (u *ui) setupTab() fyne.CanvasObject {
 	)
 	test := widget.NewButton("Test connection", u.testConnection)
 	save := widget.NewButton("Save settings", u.persist)
+	loadSites := widget.NewButton("Load supported sites", func() { go u.loadExtractors() })
 	link, _ := url.Parse(repoURL)
 	hyper := widget.NewHyperlink(strings.TrimPrefix(repoURL, "https://"), link)
-	return container.NewPadded(container.NewVBox(
-		form,
-		u.savePW,
-		u.autoUpdate,
-		container.NewHBox(test, save),
-		widget.NewLabel("Version "+Version),
-		hyper,
+	sites := container.NewVScroll(u.extractors)
+	sites.SetMinSize(fyne.NewSize(200, 180))
+	return container.NewPadded(container.NewBorder(
+		container.NewVBox(
+			form,
+			u.savePW,
+			u.autoUpdate,
+			container.NewHBox(test, save, loadSites),
+			widget.NewLabel("Sites supported by yt-dlp on the Pi"),
+		),
+		container.NewVBox(widget.NewLabel("Version "+Version), hyper),
+		nil, nil,
+		sites,
 	))
 }
 
@@ -270,8 +282,51 @@ func (u *ui) testConnection() {
 			line := strings.ReplaceAll(strings.TrimSpace(out), "\n", " · ")
 			u.status.SetText("connected: " + line)
 			u.appendLog("connected: "+line, "ok")
+			go u.loadExtractors()
 		})
 	}()
+}
+
+func (u *ui) loadExtractors() {
+	if strings.TrimSpace(u.host.Text) == "" || strings.TrimSpace(u.user.Text) == "" {
+		fyne.Do(func() {
+			u.extractors.Enable()
+			u.extractors.SetText("Set the SSH details first, then load this list.")
+			u.extractors.Disable()
+		})
+		return
+	}
+	fyne.Do(func() { u.status.SetText("Loading yt-dlp extractors…") })
+	cfg := u.cfg()
+	out, errOut, code, err := sshRun(cfg, "yt-dlp --list-extractors", 90*time.Second)
+	fyne.Do(func() {
+		u.extractors.Enable()
+		defer u.extractors.Disable()
+		if err != nil {
+			u.extractors.SetText("Could not load extractors: " + err.Error())
+			u.status.SetText("error: " + err.Error())
+			return
+		}
+		if code != 0 {
+			msg := strings.TrimSpace(errOut)
+			if msg == "" {
+				msg = "yt-dlp --list-extractors failed"
+			}
+			u.extractors.SetText(msg)
+			u.status.SetText("error: " + msg)
+			return
+		}
+		lines := strings.Split(strings.ReplaceAll(out, "\r\n", "\n"), "\n")
+		var kept []string
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if line != "" {
+				kept = append(kept, line)
+			}
+		}
+		u.extractors.SetText(strings.Join(kept, "\n"))
+		u.status.SetText(fmt.Sprintf("Loaded %d yt-dlp extractors", len(kept)))
+	})
 }
 
 func (u *ui) startDownload() {
@@ -287,7 +342,7 @@ func (u *ui) startDownload() {
 		return
 	}
 	if strings.TrimSpace(u.host.Text) == "" || strings.TrimSpace(u.user.Text) == "" {
-		u.notice.SetText("SSH details missing — see Setup.")
+		u.notice.SetText("SSH details missing — see Settings.")
 		u.tabs.Select(u.tabSetup)
 		return
 	}

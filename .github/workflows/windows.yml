@@ -23,7 +23,7 @@ jobs:
           gcc --version
           go install github.com/akavel/rsrc@latest
           "$(go env GOPATH)/bin/rsrc" -ico desktop/piload.ico -o cmd/piload/rsrc_windows.syso
-          go build -trimpath -ldflags="-s -w -H windowsgui -X main.Version=0.2.2" -o PiLoad.exe ./cmd/piload
+          go build -trimpath -ldflags="-s -w -H windowsgui -X main.Version=0.2.3" -o PiLoad.exe ./cmd/piload
       - uses: actions/upload-artifact@v4
         with:
           name: PiLoad-windows
