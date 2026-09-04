@@ -21,8 +21,8 @@ import (
 //go:embed icon.png
 var iconPNG []byte
 
-// Version is set at build time with -X main.Version=0.2.0
-var Version = "0.2.0"
+// Version is set at build time with -X main.Version=0.2.1
+var Version = "0.2.1"
 
 const repoURL = "https://github.com/abb0r/piload"
 
@@ -31,22 +31,28 @@ var progressRE = regexp.MustCompile(`(\d+(?:\.\d+)?)%`)
 type job struct {
 	ID, URL, Status string
 	Progress        int
-	Log             []string
+}
+
+type logLine struct {
+	Text, Kind string
 }
 
 type ui struct {
-	win                                           fyne.Window
-	status, notice, profileTip, queue             *widget.Label
-	urls                                          *widget.Entry
+	win                                            fyne.Window
+	status, notice, profileTip                     *widget.Label
+	queue                                          *widget.RichText
+	queueScroll                                    *container.Scroll
+	urls                                           *widget.Entry
 	host, port, user, keyPath, password, outputDir *widget.Entry
-	savePW, playlist                              *widget.Check
-	qualityBtns                                   map[string]*widget.Button
-	tabs                                          *container.AppTabs
-	tabQueue                                      *container.TabItem
-	tabSetup                                      *container.TabItem
-	quality                                       string
-	jobs                                          []*job
-	ytdlpChecked                                  bool
+	savePW, playlist, autoUpdate                   *widget.Check
+	qualityBtns                                    map[string]*widget.Button
+	tabs                                           *container.AppTabs
+	tabQueue                                       *container.TabItem
+	tabSetup                                       *container.TabItem
+	quality                                        string
+	jobs                                           []*job
+	session                                        []logLine
+	ytdlpChecked                                   bool
 }
 
 func main() {
@@ -64,7 +70,9 @@ func main() {
 	u.quality = cfg.Quality
 	u.build(cfg)
 	w.SetContent(u.layout())
-	go u.checkAppUpdate()
+	if cfg.AutoUpdate {
+		go u.checkAppUpdate()
+	}
 	w.ShowAndRun()
 }
 
@@ -73,8 +81,9 @@ func (u *ui) build(cfg Settings) {
 	u.notice = widget.NewLabel("")
 	u.profileTip = widget.NewLabel("")
 	u.profileTip.Wrapping = fyne.TextWrapWord
-	u.queue = widget.NewLabel("No jobs yet.\nProgress appears here once a download is running over SSH.")
-	u.queue.Wrapping = fyne.TextWrapWord
+	u.queue = widget.NewRichText()
+	u.queue.Wrapping = fyne.TextWrapOff
+	u.renderLog()
 
 	u.urls = widget.NewMultiLineEntry()
 	u.urls.SetPlaceHolder("https://www.youtube.com/watch?v=…")
@@ -99,6 +108,10 @@ func (u *ui) build(cfg Settings) {
 	}
 	u.savePW = widget.NewCheck("Save SSH password", nil)
 	u.savePW.SetChecked(cfg.SavePassword)
+	u.autoUpdate = widget.NewCheck("Check for PiLoad updates on startup", func(bool) {
+		u.persist()
+	})
+	u.autoUpdate.SetChecked(cfg.AutoUpdate)
 	u.setProfileTip()
 }
 
@@ -110,9 +123,10 @@ func (u *ui) layout() fyne.CanvasObject {
 	logo.FillMode = canvas.ImageFillContain
 	header := container.NewBorder(nil, nil, container.NewHBox(logo, title, ver), nil)
 
+	u.queueScroll = container.NewVScroll(u.queue)
 	u.tabs = container.NewAppTabs(
 		container.NewTabItem("Download", u.downloadTab()),
-		container.NewTabItem("Queue", container.NewPadded(container.NewVScroll(u.queue))),
+		container.NewTabItem("Queue", container.NewPadded(u.queueScroll)),
 		container.NewTabItem("Setup", u.setupTab()),
 	)
 	u.tabQueue = u.tabs.Items[1]
@@ -162,6 +176,7 @@ func (u *ui) setupTab() fyne.CanvasObject {
 	return container.NewPadded(container.NewVBox(
 		form,
 		u.savePW,
+		u.autoUpdate,
 		container.NewHBox(test, save),
 		widget.NewLabel("Version "+Version),
 		hyper,
@@ -216,6 +231,7 @@ func (u *ui) persist() {
 		Quality:      u.quality,
 		Playlist:     u.playlist.Checked,
 		SavePassword: u.savePW.Checked,
+		AutoUpdate:   u.autoUpdate.Checked,
 	}
 	if cfg.Port == "" {
 		cfg.Port = "22"
@@ -238,6 +254,7 @@ func (u *ui) testConnection() {
 		fyne.Do(func() {
 			if err != nil {
 				u.status.SetText("error: " + err.Error())
+				u.appendLog("SSH test failed: "+err.Error(), "error")
 				return
 			}
 			if code != 0 {
@@ -246,10 +263,12 @@ func (u *ui) testConnection() {
 					msg = "yt-dlp did not respond"
 				}
 				u.status.SetText("error: " + msg)
+				u.appendLog(msg, "error")
 				return
 			}
 			line := strings.ReplaceAll(strings.TrimSpace(out), "\n", " · ")
 			u.status.SetText("connected: " + line)
+			u.appendLog("connected: "+line, "ok")
 		})
 	}()
 }
@@ -282,10 +301,9 @@ func (u *ui) startDownload() {
 		if i == 0 {
 			j.Status = "running"
 		}
-		u.jobs = append([]*job{j}, u.jobs...)
+		u.jobs = append(u.jobs, j)
 		batch = append(batch, j)
 	}
-	u.renderJobs()
 	u.tabs.Select(u.tabQueue)
 	u.urls.SetText("")
 	if len(batch) == 1 {
@@ -298,24 +316,31 @@ func (u *ui) startDownload() {
 
 func (u *ui) runBatch(cfg sshCfg, quality, outDir string, playlist bool, batch []*job) {
 	if !u.ytdlpChecked {
-		fyne.Do(func() { u.status.SetText("Checking yt-dlp version…") })
+		fyne.Do(func() {
+			u.status.SetText("Checking yt-dlp version…")
+			u.appendLog("Checking yt-dlp version…", "info")
+		})
 		msg := u.checkYTDLP(cfg)
-		fyne.Do(func() { u.status.SetText(msg) })
+		kind := "ok"
+		if strings.Contains(strings.ToLower(msg), "fail") || strings.Contains(strings.ToLower(msg), "error") {
+			kind = "error"
+		}
+		fyne.Do(func() {
+			u.status.SetText(msg)
+			u.appendLog(msg, kind)
+		})
 		u.ytdlpChecked = true
 	}
 	for _, j := range batch {
 		j.Status = "running"
 		cmd := buildCommand(j.URL, quality, outDir, playlist)
-		j.Log = append(j.Log, cmd)
-		fyne.Do(u.renderJobs)
+		fyne.Do(func() {
+			u.appendLog("", "info")
+			u.appendLog("==> "+j.URL, "ok")
+			u.appendLog(cmd, "cmd")
+		})
 		code, err := sshStream(cfg, cmd, func(line string) {
-			if len(line) > 240 {
-				line = line[:240]
-			}
-			j.Log = append(j.Log, line)
-			if len(j.Log) > 40 {
-				j.Log = j.Log[len(j.Log)-40:]
-			}
+			kind := classifyLine(line)
 			if m := progressRE.FindStringSubmatch(line); len(m) > 1 {
 				var p float64
 				fmt.Sscanf(m[1], "%f", &p)
@@ -325,20 +350,19 @@ func (u *ui) runBatch(cfg sshCfg, quality, outDir string, playlist bool, batch [
 					j.Progress = 99
 				}
 			}
-			fyne.Do(u.renderJobs)
+			fyne.Do(func() { u.appendLog(line, kind) })
 		})
 		if err != nil {
 			j.Status = "error"
-			j.Log = append(j.Log, err.Error())
+			fyne.Do(func() { u.appendLog(err.Error(), "error") })
 		} else if code == 0 {
 			j.Status = "done"
 			j.Progress = 100
-			j.Log = append(j.Log, "finished")
+			fyne.Do(func() { u.appendLog("finished", "ok") })
 		} else {
 			j.Status = "error"
-			j.Log = append(j.Log, fmt.Sprintf("yt-dlp exit %d", code))
+			fyne.Do(func() { u.appendLog(fmt.Sprintf("yt-dlp exit %d", code), "error") })
 		}
-		fyne.Do(u.renderJobs)
 	}
 }
 
@@ -368,40 +392,84 @@ func (u *ui) checkYTDLP(cfg sshCfg) string {
 	}
 	updOut, updErr, _, _ := sshRun(cfg, "yt-dlp -U", 3*time.Minute)
 	text := strings.TrimSpace(updOut + "\n" + updErr)
-	lines := strings.Split(text, "\n")
-	last := ""
-	if len(lines) > 0 {
-		last = lines[len(lines)-1]
-	}
-	if len(last) > 180 {
-		last = last[:180]
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			fyne.Do(func() { u.appendLog(line, classifyLine(line)) })
+		}
 	}
 	out2, _, _, _ := sshRun(cfg, "yt-dlp --version", 20*time.Second)
 	now := strings.TrimSpace(out2)
 	if f := strings.Fields(now); len(f) > 0 {
 		now = f[0]
 	}
-	return fmt.Sprintf("yt-dlp update %s: %s", now, last)
+	return fmt.Sprintf("yt-dlp updated to %s", now)
 }
 
-func (u *ui) renderJobs() {
-	if len(u.jobs) == 0 {
-		u.queue.SetText("No jobs yet.\nProgress appears here once a download is running over SSH.")
+func classifyLine(line string) string {
+	l := strings.ToLower(line)
+	switch {
+	case strings.Contains(l, "error"), strings.Contains(l, "failed"), strings.Contains(l, "traceback"),
+		strings.Contains(l, "exit "), strings.HasPrefix(l, "error:"):
+		return "error"
+	case strings.Contains(l, "warning"), strings.Contains(l, "warn"):
+		return "warn"
+	case strings.Contains(l, "finished"), strings.Contains(l, "is current"), strings.HasPrefix(l, "connected"):
+		return "ok"
+	case strings.HasPrefix(l, "yt-dlp ") || strings.HasPrefix(l, "'yt-dlp'"):
+		return "cmd"
+	default:
+		return "info"
+	}
+}
+
+func (u *ui) appendLog(text, kind string) {
+	u.session = append(u.session, logLine{Text: text, Kind: kind})
+	u.renderLog()
+}
+
+func (u *ui) renderLog() {
+	if len(u.session) == 0 {
+		u.queue.Segments = []widget.RichTextSegment{
+			&widget.TextSegment{
+				Text:  "No jobs yet.\nProgress appears here once a download is running over SSH.\nYou can scroll back to the start of the session.",
+				Style: widget.RichTextStyle{ColorName: theme.ColorNameDisabled, TextStyle: fyne.TextStyle{Monospace: true}},
+			},
+		}
+		u.queue.Refresh()
 		return
 	}
-	var b strings.Builder
-	for _, j := range u.jobs {
-		fmt.Fprintf(&b, "[%s] %d%%  %s\n", j.Status, j.Progress, j.URL)
-		start := 0
-		if len(j.Log) > 8 {
-			start = len(j.Log) - 8
+	segs := make([]widget.RichTextSegment, 0, len(u.session))
+	for _, line := range u.session {
+		colorName := theme.ColorNameForeground
+		switch line.Kind {
+		case "error":
+			colorName = theme.ColorNameError
+		case "warn":
+			colorName = theme.ColorNameWarning
+		case "ok":
+			colorName = theme.ColorNameSuccess
+		case "cmd":
+			colorName = theme.ColorNamePrimary
 		}
-		for _, line := range j.Log[start:] {
-			fmt.Fprintf(&b, "    %s\n", line)
+		text := line.Text
+		if text == "" {
+			text = " "
 		}
-		b.WriteByte('\n')
+		segs = append(segs, &widget.TextSegment{
+			Text: text + "\n",
+			Style: widget.RichTextStyle{
+				ColorName: colorName,
+				Inline:    false,
+				TextStyle: fyne.TextStyle{Monospace: true},
+			},
+		})
 	}
-	u.queue.SetText(b.String())
+	u.queue.Segments = segs
+	u.queue.Refresh()
+	if u.queueScroll != nil {
+		u.queueScroll.ScrollToBottom()
+	}
 }
 
 func (u *ui) checkAppUpdate() {

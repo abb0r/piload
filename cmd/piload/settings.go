@@ -17,6 +17,7 @@ type Settings struct {
 	Playlist     bool   `json:"playlist"`
 	SavePassword bool   `json:"save_password"`
 	Password     string `json:"password"`
+	AutoUpdate   bool   `json:"auto_update"`
 }
 
 func settingsPath() string {
@@ -35,7 +36,8 @@ func defaultSettings() Settings {
 		User:      "dietpi",
 		Auth:      "password",
 		OutputDir: "/mnt/dietpi_userdata/downloads",
-		Quality:   "best",
+		Quality:    "best",
+		AutoUpdate: true,
 	}
 }
 
@@ -46,6 +48,12 @@ func loadSettings() Settings {
 		return cfg
 	}
 	_ = json.Unmarshal(data, &cfg)
+	var raw map[string]json.RawMessage
+	if json.Unmarshal(data, &raw) == nil {
+		if _, ok := raw["auto_update"]; !ok {
+			cfg.AutoUpdate = true
+		}
+	}
 	if _, ok := presets[cfg.Quality]; !ok {
 		cfg.Quality = "best"
 	}
