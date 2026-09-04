@@ -1,4 +1,4 @@
-# PiLoad
+# <img src="docs/icon.png" alt="PiLoad" width="36" height="36"> PiLoad
 
 Windows program that starts **yt-dlp on a DietPi Raspberry Pi over SSH**.
 
