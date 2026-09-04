@@ -19,10 +19,11 @@ from pathlib import Path
 
 import customtkinter as ctk
 import paramiko
+from PIL import Image
 
 APP_DIR = Path(os.environ.get("APPDATA") or Path.home() / ".piload") / "PiLoad"
 SETTINGS = APP_DIR / "settings.json"
-VERSION = "0.1.6"
+VERSION = "0.1.7"
 REPO_URL = "https://github.com/abb0r/piload"
 
 PRESETS = {
@@ -143,18 +144,23 @@ class HoverTip:
             self.tip = None
 
 
-def app_icon_path() -> Path | None:
-    candidates = []
+def bundled_file(*names: str) -> Path | None:
+    bases = []
     if getattr(sys, "frozen", False):
-        meipass = Path(getattr(sys, "_MEIPASS", ""))
-        candidates.append(meipass / "piload.ico")
-        candidates.append(Path(sys.executable).with_name("piload.ico"))
+        bases.append(Path(getattr(sys, "_MEIPASS", "")))
+        bases.append(Path(sys.executable).resolve().parent)
     here = Path(__file__).resolve().parent
-    candidates.append(here / "piload.ico")
-    for path in candidates:
-        if path.is_file():
-            return path
+    bases.extend([here, here.parent / "docs"])
+    for base in bases:
+        for name in names:
+            path = base / name
+            if path.is_file():
+                return path
     return None
+
+
+def app_icon_path() -> Path | None:
+    return bundled_file("piload.ico")
 
 
 def load_settings() -> dict:
@@ -335,6 +341,10 @@ class App(ctk.CTk):
         header.pack(fill="x")
         title_row = ctk.CTkFrame(header, fg_color="transparent")
         title_row.pack(fill="x", padx=18, pady=(18, 16))
+        logo = bundled_file("piload.png", "icon.png")
+        if logo is not None:
+            self._logo = ctk.CTkImage(Image.open(logo), size=(40, 40))
+            ctk.CTkLabel(title_row, image=self._logo, text="").pack(side="left", padx=(0, 10))
         ctk.CTkLabel(
             title_row,
             text="PiLoad",
