@@ -22,7 +22,7 @@ import (
 var iconPNG []byte
 
 // Version is set at build time with -X main.Version=0.2.1
-var Version = "0.2.1"
+var Version = "0.2.2"
 
 const repoURL = "https://github.com/abb0r/piload"
 
@@ -82,7 +82,7 @@ func (u *ui) build(cfg Settings) {
 	u.profileTip = widget.NewLabel("")
 	u.profileTip.Wrapping = fyne.TextWrapWord
 	u.queue = widget.NewRichText()
-	u.queue.Wrapping = fyne.TextWrapOff
+	u.queue.Wrapping = fyne.TextWrapBreak
 	u.renderLog()
 
 	u.urls = widget.NewMultiLineEntry()
@@ -124,9 +124,10 @@ func (u *ui) layout() fyne.CanvasObject {
 	header := container.NewBorder(nil, nil, container.NewHBox(logo, title, ver), nil)
 
 	u.queueScroll = container.NewVScroll(u.queue)
+	u.queueScroll.SetMinSize(fyne.NewSize(200, 200))
 	u.tabs = container.NewAppTabs(
 		container.NewTabItem("Download", u.downloadTab()),
-		container.NewTabItem("Queue", container.NewPadded(u.queueScroll)),
+		container.NewTabItem("Queue", container.NewBorder(nil, nil, nil, nil, u.queueScroll)),
 		container.NewTabItem("Setup", u.setupTab()),
 	)
 	u.tabQueue = u.tabs.Items[1]
@@ -468,6 +469,10 @@ func (u *ui) renderLog() {
 	u.queue.Segments = segs
 	u.queue.Refresh()
 	if u.queueScroll != nil {
+		sz := u.queueScroll.Size()
+		if sz.Width > 40 {
+			u.queue.Resize(fyne.NewSize(sz.Width-8, u.queue.MinSize().Height))
+		}
 		u.queueScroll.ScrollToBottom()
 	}
 }
