@@ -15,44 +15,46 @@ import (
 const repoAPI = "https://api.github.com/repos/abb0r/piload/releases/latest"
 
 type ghRelease struct {
-	Tag    string `json:"tag_name"`
+	Tag  string `json:"tag_name"`
+	Body string `json:"body"`
 	Assets []struct {
 		Name string `json:"name"`
 		URL  string `json:"browser_download_url"`
 	} `json:"assets"`
 }
 
-func latestAppRelease() (tag, exeURL string, err error) {
+func latestAppRelease() (tag, exeURL, notes string, err error) {
 	req, err := http.NewRequest(http.MethodGet, repoAPI, nil)
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 	req.Header.Set("User-Agent", "PiLoad/"+Version)
 	req.Header.Set("Accept", "application/vnd.github+json")
 	client := &http.Client{Timeout: 15 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 	if resp.StatusCode >= 400 {
-		return "", "", fmt.Errorf("GitHub API %s", resp.Status)
+		return "", "", "", fmt.Errorf("GitHub API %s", resp.Status)
 	}
 	var rel ghRelease
 	if err := json.Unmarshal(body, &rel); err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 	tag = strings.TrimPrefix(strings.TrimSpace(rel.Tag), "v")
+	notes = strings.TrimSpace(rel.Body)
 	for _, a := range rel.Assets {
 		if strings.EqualFold(a.Name, "PiLoad.exe") {
-			return tag, a.URL, nil
+			return tag, a.URL, notes, nil
 		}
 	}
-	return tag, "", fmt.Errorf("no PiLoad.exe in latest release")
+	return tag, "", notes, fmt.Errorf("no PiLoad.exe in latest release")
 }
 
 func applyUpdate(exeURL string) error {

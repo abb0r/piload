@@ -13,7 +13,6 @@ On startup PiLoad checks GitHub for a newer release and asks before updating.
 ## Settings in the app
 
 On the **Settings** tab enter host, port `22`, user (`dietpi`) and a password or key file.
-You can also load the list of sites supported by yt-dlp on the Pi.
 On the **Download** tab paste one video URL per line, then send them over SSH.
 
 ## yt-dlp on DietPi
