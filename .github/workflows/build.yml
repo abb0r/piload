@@ -67,18 +67,44 @@ jobs:
           go-version: "1.24"
       - name: Build app and DMG
         run: |
-          go env GOARCH
-          go install fyne.io/tools/cmd/fyne@latest
-          export PATH="$(go env GOPATH)/bin:$PATH"
-          CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 fyne package -os darwin \
-            -name PiLoad \
-            -appID com.abb0r.piload \
-            -appVersion "${APP_VERSION}" \
-            -appBuild 1 \
-            -icon cmd/piload/icon.png \
-            -release \
-            -src ./cmd/piload
-          test -d PiLoad.app
+          set -euo pipefail
+          CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags="-s -w -X main.Version=${APP_VERSION}" -o piload ./cmd/piload
+          mkdir -p icon.iconset
+          ICON=cmd/piload/icon.png
+          sips -z 16 16     "$ICON" --out icon.iconset/icon_16x16.png
+          sips -z 32 32     "$ICON" --out icon.iconset/icon_16x16@2x.png
+          sips -z 32 32     "$ICON" --out icon.iconset/icon_32x32.png
+          sips -z 64 64     "$ICON" --out icon.iconset/icon_32x32@2x.png
+          sips -z 128 128   "$ICON" --out icon.iconset/icon_128x128.png
+          sips -z 256 256   "$ICON" --out icon.iconset/icon_128x128@2x.png
+          sips -z 256 256   "$ICON" --out icon.iconset/icon_256x256.png
+          sips -z 512 512   "$ICON" --out icon.iconset/icon_256x256@2x.png
+          sips -z 512 512   "$ICON" --out icon.iconset/icon_512x512.png
+          sips -z 1024 1024 "$ICON" --out icon.iconset/icon_512x512@2x.png
+          iconutil -c icns icon.iconset -o PiLoad.icns
+          mkdir -p PiLoad.app/Contents/MacOS PiLoad.app/Contents/Resources
+          mv piload PiLoad.app/Contents/MacOS/PiLoad
+          chmod +x PiLoad.app/Contents/MacOS/PiLoad
+          mv PiLoad.icns PiLoad.app/Contents/Resources/PiLoad.icns
+          cat > PiLoad.app/Contents/Info.plist <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleDevelopmentRegion</key><string>en</string>
+            <key>CFBundleExecutable</key><string>PiLoad</string>
+            <key>CFBundleIconFile</key><string>PiLoad</string>
+            <key>CFBundleIdentifier</key><string>com.abb0r.piload</string>
+            <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+            <key>CFBundleName</key><string>PiLoad</string>
+            <key>CFBundlePackageType</key><string>APPL</string>
+            <key>CFBundleShortVersionString</key><string>${APP_VERSION}</string>
+            <key>CFBundleVersion</key><string>${APP_VERSION}</string>
+            <key>LSMinimumSystemVersion</key><string>12.0</string>
+            <key>NSHighResolutionCapable</key><true/>
+          </dict>
+          </plist>
+          EOF
           mkdir -p dmgroot
           cp -R PiLoad.app dmgroot/
           ln -s /Applications dmgroot/Applications
@@ -108,7 +134,7 @@ jobs:
             --target main \
             --title "PiLoad ${APP_VERSION}" \
             --notes "$(cat <<'EOF'
-          Linux is now a Flatpak. macOS is a signed-style .app inside a disk image.
+          Linux is now a Flatpak. macOS ships as a .app inside a disk image.
 
           - Windows: `PiLoad.exe`
           - Linux: `PiLoad-linux-x86_64.flatpak` — install with `flatpak install --user PiLoad-linux-x86_64.flatpak`
