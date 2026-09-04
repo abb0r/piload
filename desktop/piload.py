@@ -23,7 +23,7 @@ from PIL import Image
 
 APP_DIR = Path(os.environ.get("APPDATA") or Path.home() / ".piload") / "PiLoad"
 SETTINGS = APP_DIR / "settings.json"
-VERSION = "0.1.8"
+VERSION = "0.1.9"
 REPO_URL = "https://github.com/abb0r/piload"
 
 PRESETS = {
