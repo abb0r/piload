@@ -22,7 +22,7 @@ import (
 var iconPNG []byte
 
 // Version is set at build time with -X main.Version=0.2.1
-var Version = "0.2.5"
+var Version = "0.3.0"
 
 const repoURL = "https://github.com/abb0r/piload"
 

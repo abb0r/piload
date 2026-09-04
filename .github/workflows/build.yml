@@ -1,0 +1,60 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+      - name: MinGW
+        run: choco install mingw -y --no-progress
+      - name: Build
+        shell: bash
+        run: |
+          export PATH="/c/ProgramData/mingw64/mingw64/bin:/c/mingw64/bin:$PATH"
+          go install github.com/akavel/rsrc@latest
+          "$(go env GOPATH)/bin/rsrc" -ico desktop/piload.ico -o cmd/piload/rsrc_windows.syso
+          go build -trimpath -ldflags="-s -w -H windowsgui -X main.Version=0.3.0" -o PiLoad.exe ./cmd/piload
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PiLoad-windows
+          path: PiLoad.exe
+
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+      - name: Deps
+        run: sudo apt-get update && sudo apt-get install -y gcc libgl1-mesa-dev xorg-dev libxkbcommon-dev
+      - name: Build
+        run: go build -trimpath -ldflags="-s -w -X main.Version=0.3.0" -o PiLoad-linux-amd64 ./cmd/piload
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PiLoad-linux
+          path: PiLoad-linux-amd64
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+      - name: Build
+        run: |
+          go env GOARCH
+          CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags="-s -w -X main.Version=0.3.0" -o PiLoad-macos-arm64 ./cmd/piload
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PiLoad-macos
+          path: PiLoad-macos-arm64

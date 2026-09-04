@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -49,12 +50,24 @@ func latestAppRelease() (tag, exeURL, notes string, err error) {
 	}
 	tag = strings.TrimPrefix(strings.TrimSpace(rel.Tag), "v")
 	notes = strings.TrimSpace(rel.Body)
+	want := releaseAssetName()
 	for _, a := range rel.Assets {
-		if strings.EqualFold(a.Name, "PiLoad.exe") {
+		if strings.EqualFold(a.Name, want) {
 			return tag, a.URL, notes, nil
 		}
 	}
-	return tag, "", notes, fmt.Errorf("no PiLoad.exe in latest release")
+	return tag, "", notes, fmt.Errorf("no %s in latest release", want)
+}
+
+func releaseAssetName() string {
+	switch runtime.GOOS {
+	case "windows":
+		return "PiLoad.exe"
+	case "darwin":
+		return "PiLoad-macos-arm64"
+	default:
+		return "PiLoad-linux-amd64"
+	}
 }
 
 func cleanupOldBinary() {
@@ -101,7 +114,7 @@ func applyUpdate(exeURL string, progress func(got, total int64)) error {
 		self = resolved
 	}
 	dir := filepath.Dir(self)
-	tmp := filepath.Join(dir, "PiLoad.exe.new")
+	tmp := self + ".new"
 	old := self + ".old"
 
 	req, err := http.NewRequest(http.MethodGet, exeURL, nil)

@@ -1,12 +1,14 @@
 # <img src="docs/icon.png" alt="PiLoad" width="36" height="36"> PiLoad
 
-Windows program that starts **yt-dlp on a DietPi Raspberry Pi over SSH**.
+Windows, Linux and macOS (Apple Silicon) program that starts **yt-dlp on a DietPi Raspberry Pi over SSH**.
 
 ![PiLoad](docs/piload.png)
 
-## Windows
+## Download
 
-[Download PiLoad.exe](https://github.com/abb0r/piload/releases/latest/download/PiLoad.exe)
+- [Windows](https://github.com/abb0r/piload/releases/latest/download/PiLoad.exe)
+- [Linux](https://github.com/abb0r/piload/releases/latest/download/PiLoad-linux-amd64)
+- [macOS Apple Silicon](https://github.com/abb0r/piload/releases/latest/download/PiLoad-macos-arm64)
 
 On startup PiLoad checks GitHub for a newer release and asks before updating.
 
