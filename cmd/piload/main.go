@@ -21,8 +21,8 @@ import (
 //go:embed icon.png
 var iconPNG []byte
 
-// Version is set at build time with -X main.Version=0.3.2
-var Version = "0.3.2"
+// Version is set at build time with -X main.Version=0.3.3
+var Version = "0.3.3"
 
 const repoURL = "https://github.com/abb0r/piload"
 
@@ -40,7 +40,7 @@ type logLine struct {
 type ui struct {
 	win                                            fyne.Window
 	status, notice, profileTip                     *widget.Label
-	queue                                          *widget.RichText
+	queue                                          *widget.Entry
 	queueScroll                                    *container.Scroll
 	urls                                           *widget.Entry
 	host, port, user, keyPath, password, outputDir *widget.Entry
@@ -82,8 +82,9 @@ func (u *ui) build(cfg Settings) {
 	u.notice = widget.NewLabel("")
 	u.profileTip = widget.NewLabel("")
 	u.profileTip.Wrapping = fyne.TextWrapWord
-	u.queue = widget.NewRichText()
+	u.queue = widget.NewMultiLineEntry()
 	u.queue.Wrapping = fyne.TextWrapBreak
+	u.queue.TextStyle = fyne.TextStyle{Monospace: true}
 	u.renderLog()
 
 	u.urls = widget.NewMultiLineEntry()
@@ -126,9 +127,12 @@ func (u *ui) layout() fyne.CanvasObject {
 
 	u.queueScroll = container.NewVScroll(u.queue)
 	u.queueScroll.SetMinSize(fyne.NewSize(200, 200))
+	copyLog := widget.NewButton("Copy log", func() {
+		fyne.CurrentApp().Clipboard().SetContent(u.queue.Text)
+	})
 	u.tabs = container.NewAppTabs(
 		container.NewTabItem("Download", u.downloadTab()),
-		container.NewTabItem("Queue", container.NewBorder(nil, nil, nil, nil, u.queueScroll)),
+		container.NewTabItem("Queue", container.NewBorder(container.NewHBox(copyLog), nil, nil, nil, u.queueScroll)),
 		container.NewTabItem("Settings", u.setupTab()),
 	)
 	u.tabQueue = u.tabs.Items[1]
@@ -432,48 +436,18 @@ func (u *ui) appendLog(text, kind string) {
 
 func (u *ui) renderLog() {
 	if len(u.session) == 0 {
-		u.queue.Segments = []widget.RichTextSegment{
-			&widget.TextSegment{
-				Text:  "No jobs yet.\nProgress appears here once a download is running over SSH.\nYou can scroll back to the start of the session.",
-				Style: widget.RichTextStyle{ColorName: theme.ColorNameDisabled, TextStyle: fyne.TextStyle{Monospace: true}},
-			},
-		}
-		u.queue.Refresh()
+		u.queue.SetText("No jobs yet.\nProgress appears here once a download is running over SSH.\nSelect text to copy, or use Copy log.")
 		return
 	}
-	segs := make([]widget.RichTextSegment, 0, len(u.session))
-	for _, line := range u.session {
-		colorName := theme.ColorNameForeground
-		switch line.Kind {
-		case "error":
-			colorName = theme.ColorNameError
-		case "warn":
-			colorName = theme.ColorNameWarning
-		case "ok":
-			colorName = theme.ColorNameSuccess
-		case "cmd":
-			colorName = theme.ColorNamePrimary
+	var b strings.Builder
+	for i, line := range u.session {
+		if i > 0 {
+			b.WriteByte('\n')
 		}
-		text := line.Text
-		if text == "" {
-			text = " "
-		}
-		segs = append(segs, &widget.TextSegment{
-			Text: text + "\n",
-			Style: widget.RichTextStyle{
-				ColorName: colorName,
-				Inline:    false,
-				TextStyle: fyne.TextStyle{Monospace: true},
-			},
-		})
+		b.WriteString(line.Text)
 	}
-	u.queue.Segments = segs
-	u.queue.Refresh()
+	u.queue.SetText(b.String())
 	if u.queueScroll != nil {
-		sz := u.queueScroll.Size()
-		if sz.Width > 40 {
-			u.queue.Resize(fyne.NewSize(sz.Width-8, u.queue.MinSize().Height))
-		}
 		u.queueScroll.ScrollToBottom()
 	}
 }

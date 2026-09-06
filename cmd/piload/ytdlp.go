@@ -30,11 +30,7 @@ var presets = map[string][]string{
 }
 
 var commonArgs = []string{
-	"--embed-metadata", "--embed-chapters", "--embed-subs",
-	"--sub-langs", "en.*,de.*,-live_chat", "--write-auto-subs",
-	"--ignore-errors", "--no-abort-on-error",
-	"--sleep-subtitles", "2", "--extractor-retries", "3",
-	"--retry-sleep", "http:5",
+	"--embed-metadata", "--embed-chapters",
 	"--sponsorblock-mark", "all", "--concurrent-fragments", "4",
 	"--no-mtime", "--restrict-filenames", "--newline", "--no-warnings",
 }
