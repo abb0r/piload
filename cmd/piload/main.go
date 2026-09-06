@@ -21,8 +21,8 @@ import (
 //go:embed icon.png
 var iconPNG []byte
 
-// Version is set at build time with -X main.Version=0.3.1
-var Version = "0.3.1"
+// Version is set at build time with -X main.Version=0.3.2
+var Version = "0.3.2"
 
 const repoURL = "https://github.com/abb0r/piload"
 

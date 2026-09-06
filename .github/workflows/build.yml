@@ -9,7 +9,7 @@ permissions:
   contents: write
 
 env:
-  APP_VERSION: "0.3.1"
+  APP_VERSION: "0.3.2"
 
 jobs:
   windows:
@@ -134,11 +134,11 @@ jobs:
             --target main \
             --title "PiLoad ${APP_VERSION}" \
             --notes "$(cat <<'EOF'
-          Linux is now a Flatpak. macOS ships as a .app inside a disk image.
+          Failed subtitle downloads (YouTube HTTP 429) no longer abort the video.
 
           - Windows: `PiLoad.exe`
-          - Linux: `PiLoad-linux-x86_64.flatpak` — install with `flatpak install --user PiLoad-linux-x86_64.flatpak`
-          - macOS Apple Silicon: `PiLoad-macos-arm64.dmg` — open the image and drag PiLoad.app to Applications
+          - Linux: `PiLoad-linux-x86_64.flatpak`
+          - macOS Apple Silicon: `PiLoad-macos-arm64.dmg`
           EOF
           )" \
             --latest \
