@@ -21,8 +21,8 @@ import (
 //go:embed icon.png
 var iconPNG []byte
 
-// Version is set at build time with -X main.Version=0.3.3
-var Version = "0.3.3"
+// Version is set at build time with -X main.Version=0.3.4
+var Version = "0.3.4"
 
 const repoURL = "https://github.com/abb0r/piload"
 
@@ -447,9 +447,16 @@ func (u *ui) renderLog() {
 		b.WriteString(line.Text)
 	}
 	u.queue.SetText(b.String())
-	if u.queueScroll != nil {
-		u.queueScroll.ScrollToBottom()
-	}
+	u.scrollQueueToEnd()
+}
+
+// The log is a multiline entry, which scrolls itself. The outer container
+// cannot move that inner view, so the cursor is placed past the last row.
+// Fyne then clamps the scroll offset to the bottom.
+func (u *ui) scrollQueueToEnd() {
+	u.queue.CursorRow = strings.Count(u.queue.Text, "\n") + 100000
+	u.queue.CursorColumn = 0
+	u.queue.Refresh()
 }
 
 func (u *ui) checkAppUpdate() {
