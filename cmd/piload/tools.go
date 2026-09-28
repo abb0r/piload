@@ -173,26 +173,31 @@ func toolsReady() bool {
 }
 
 func localToolsStatus() string {
-	dir, err := toolsDir()
-	if err != nil {
-		return "Local tools: " + err.Error()
+	var b strings.Builder
+	fmt.Fprintf(&b, "PiLoad %s", Version)
+	type item struct {
+		name string
+		path string
+		args []string
 	}
-	if !fileExists(ytdlpPath()) && !fileExists(ffmpegPath()) && !fileExists(denoPath()) {
-		return "Local tools: not installed yet. They download on the first local job.\n" + dir
+	for _, it := range []item{
+		{"yt-dlp", ytdlpPath(), []string{"--version"}},
+		{"FFmpeg", ffmpegPath(), []string{"-version"}},
+		{"Deno", denoPath(), []string{"--version"}},
+	} {
+		b.WriteByte('\n')
+		if !fileExists(it.path) {
+			fmt.Fprintf(&b, "%s not installed", it.name)
+			continue
+		}
+		ver, err := cmdVersion(it.path, it.args...)
+		if err != nil || ver == "" {
+			fmt.Fprintf(&b, "%s not installed", it.name)
+			continue
+		}
+		fmt.Fprintf(&b, "%s %s", it.name, ver)
 	}
-	y := "missing"
-	if v, err := cmdVersion(ytdlpPath(), "--version"); err == nil {
-		y = v
-	}
-	ff := "missing"
-	if v, err := cmdVersion(ffmpegPath(), "-version"); err == nil {
-		ff = v
-	}
-	d := "missing"
-	if v, err := cmdVersion(denoPath(), "--version"); err == nil {
-		d = v
-	}
-	return fmt.Sprintf("Local tools: yt-dlp %s, ffmpeg %s, deno %s\n%s", y, ff, d, dir)
+	return b.String()
 }
 
 func githubRelease(repo string) (ghRelease, error) {

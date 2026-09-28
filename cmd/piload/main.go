@@ -23,8 +23,8 @@ import (
 //go:embed icon.png
 var iconPNG []byte
 
-// Version is set at build time with -X main.Version=0.4.1
-var Version = "0.4.1"
+// Version is set at build time with -X main.Version=0.4.2
+var Version = "0.4.2"
 
 const repoURL = "https://github.com/abb0r/piload"
 
@@ -56,6 +56,7 @@ type ui struct {
 	tabSetup                                                 *container.TabItem
 	quality                                                  string
 	wantLocal                                                bool
+	ignoreTargetSave                                         bool
 	dismissedYTDLP, dismissedDeno                            string
 	jobs                                                     []*job
 	session                                                  []logLine
@@ -127,7 +128,7 @@ func (u *ui) build(cfg Settings) {
 	u.autoUpdate = widget.NewCheck("Check for updates on startup", nil)
 	u.autoUpdate.SetChecked(cfg.AutoUpdate)
 	u.autoUpdate.OnChanged = func(bool) { u.persist() }
-	u.toolsLabel = widget.NewLabel("Local tools: checking…")
+	u.toolsLabel = widget.NewLabel("PiLoad " + Version)
 	u.toolsLabel.Wrapping = fyne.TextWrapWord
 	u.setProfileTip()
 	u.refreshToolsLabel()
@@ -160,13 +161,18 @@ func (u *ui) downloadTab() fyne.CanvasObject {
 	u.target = widget.NewRadioGroup([]string{"Raspberry Pi", "Local"}, func(sel string) {
 		u.wantLocal = sel == "Local"
 		u.refreshDest()
+		if !u.ignoreTargetSave {
+			_ = saveSettings(u.snapshot())
+		}
 	})
 	u.target.Horizontal = true
+	u.ignoreTargetSave = true
 	if u.wantLocal {
 		u.target.SetSelected("Local")
 	} else {
 		u.target.SetSelected("Raspberry Pi")
 	}
+	u.ignoreTargetSave = false
 	u.destHint = widget.NewLabel("")
 	u.destHint.Wrapping = fyne.TextWrapWord
 	row := container.NewHBox()
@@ -225,9 +231,8 @@ func (u *ui) setupTab() fyne.CanvasObject {
 		widget.NewLabel("Local folder"),
 		container.NewBorder(nil, nil, nil, browse, u.localDir),
 		u.autoUpdate,
-		u.toolsLabel,
 		container.NewHBox(test, save),
-		widget.NewLabel("Version "+Version),
+		u.toolsLabel,
 		hyper,
 	)
 	return container.NewPadded(container.NewVScroll(body))
