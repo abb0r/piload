@@ -1,6 +1,6 @@
 # <img src="docs/icon.png" alt="PiLoad" width="36" height="36"> PiLoad
 
-Windows, Linux and macOS (Apple Silicon) app for **yt-dlp**. Download on this computer, or on a DietPi Raspberry Pi over SSH.
+Windows, Linux and macOS (Apple Silicon) app for **yt-dlp**. Download locally, or on a DietPi Raspberry Pi over SSH.
 
 ![PiLoad](docs/piload.png)
 
@@ -25,7 +25,7 @@ Open the `.dmg` and drag **PiLoad.app** to Applications.
 
 ## Use
 
-On the **Download** tab choose **Raspberry Pi** or **This PC**, paste one video URL per line, pick a quality, and start.
+On the **Download** tab choose **Raspberry Pi** or **Local**, paste one video URL per line, pick a quality, and start.
 
 | Profile | Result |
 | --- | --- |
@@ -34,7 +34,7 @@ On the **Download** tab choose **Raspberry Pi** or **This PC**, paste one video 
 | 720p | Up to 720p, merged to MP4 |
 | Audio only | Best audio, saved as MP3 |
 
-On the **Settings** tab set the Pi connection, the folder on the Pi, and the folder on this computer. The local default is Videos on Windows, Movies on macOS, and the Videos directory on Linux.
+On the **Settings** tab set the Pi connection, the folder on the Pi, and the local folder. The local default is Videos on Windows, Movies on macOS, and the Videos directory on Linux.
 
 The first local download fetches yt-dlp, FFmpeg, ffprobe and Deno if they are missing:
 

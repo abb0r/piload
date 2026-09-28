@@ -1,6 +1,6 @@
 [Desktop Entry]
 Name=PiLoad
-Comment=yt-dlp on this computer or on a DietPi Raspberry Pi
+Comment=yt-dlp locally or on a DietPi Raspberry Pi
 Exec=piload
 Icon=com.abb0r.PiLoad
 Terminal=false

@@ -23,8 +23,8 @@ import (
 //go:embed icon.png
 var iconPNG []byte
 
-// Version is set at build time with -X main.Version=0.4.0
-var Version = "0.4.0"
+// Version is set at build time with -X main.Version=0.4.1
+var Version = "0.4.1"
 
 const repoURL = "https://github.com/abb0r/piload"
 
@@ -157,13 +157,13 @@ func (u *ui) layout() fyne.CanvasObject {
 }
 
 func (u *ui) downloadTab() fyne.CanvasObject {
-	u.target = widget.NewRadioGroup([]string{"Raspberry Pi", "This PC"}, func(sel string) {
-		u.wantLocal = sel == "This PC"
+	u.target = widget.NewRadioGroup([]string{"Raspberry Pi", "Local"}, func(sel string) {
+		u.wantLocal = sel == "Local"
 		u.refreshDest()
 	})
 	u.target.Horizontal = true
 	if u.wantLocal {
-		u.target.SetSelected("This PC")
+		u.target.SetSelected("Local")
 	} else {
 		u.target.SetSelected("Raspberry Pi")
 	}
@@ -380,12 +380,12 @@ func (u *ui) startDownload() {
 	u.urls.SetText("")
 	if len(batch) == 1 {
 		if local {
-			u.notice.SetText("1 job started on this PC.")
+			u.notice.SetText("1 job started locally.")
 		} else {
 			u.notice.SetText("1 job started over SSH.")
 		}
 	} else if local {
-		u.notice.SetText(fmt.Sprintf("%d jobs started on this PC.", len(batch)))
+		u.notice.SetText(fmt.Sprintf("%d jobs started locally.", len(batch)))
 	} else {
 		u.notice.SetText(fmt.Sprintf("%d jobs started over SSH.", len(batch)))
 	}
@@ -642,7 +642,7 @@ func (u *ui) runUpdatePlan(plan updatePlan) {
 
 func (u *ui) isLocal() bool {
 	if u.target != nil && u.target.Selected != "" {
-		return u.target.Selected == "This PC"
+		return u.target.Selected == "Local"
 	}
 	return u.wantLocal
 }
@@ -650,14 +650,14 @@ func (u *ui) isLocal() bool {
 func (u *ui) refreshDest() {
 	if u.destHint != nil && u.localDir != nil && u.outputDir != nil {
 		if u.isLocal() {
-			u.destHint.SetText("Saving on this PC to " + strings.TrimSpace(u.localDir.Text))
+			u.destHint.SetText("Saving locally to " + strings.TrimSpace(u.localDir.Text))
 		} else {
 			u.destHint.SetText("Saving on the Pi to " + strings.TrimSpace(u.outputDir.Text))
 		}
 	}
 	if u.goBtn != nil {
 		if u.isLocal() {
-			u.goBtn.SetText("Download on this PC")
+			u.goBtn.SetText("Download locally")
 		} else {
 			u.goBtn.SetText("Download via SSH")
 		}

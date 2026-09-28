@@ -9,7 +9,7 @@ permissions:
   contents: write
 
 env:
-  APP_VERSION: "0.4.0"
+  APP_VERSION: "0.4.1"
 
 jobs:
   windows:
@@ -134,7 +134,7 @@ jobs:
             --target main \
             --title "PiLoad ${APP_VERSION}" \
             --notes "$(cat <<'EOF'
-          Download on this PC or on the Pi over SSH.
+          Download locally, or on the Pi over SSH.
 
           Local yt-dlp, FFmpeg and Deno are fetched on the first local job. If they are already installed, startup can offer updates before replacing them.
 
