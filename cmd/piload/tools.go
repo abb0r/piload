@@ -343,10 +343,6 @@ func installDeno(progress toolProgress) error {
 	if err != nil {
 		return err
 	}
-	dir, err := toolsDir()
-	if err != nil {
-		return err
-	}
 	archive := filepath.Join(os.TempDir(), denoAssetName())
 	if err := downloadURL(url, archive, func(got, total int64) {
 		if progress != nil {
