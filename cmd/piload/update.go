@@ -19,8 +19,8 @@ const (
 )
 
 type ghRelease struct {
-	Tag  string `json:"tag_name"`
-	Body string `json:"body"`
+	Tag    string `json:"tag_name"`
+	Body   string `json:"body"`
 	Assets []struct {
 		Name string `json:"name"`
 		URL  string `json:"browser_download_url"`

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -69,6 +70,28 @@ func buildCommand(url, quality, outputDir string, playlist bool) string {
 		quoted[i] = shQuote(a)
 	}
 	return strings.Join(quoted, " ")
+}
+
+func buildLocalArgs(url, quality, outputDir string, playlist bool) []string {
+	bin, err := toolsDir()
+	if err != nil {
+		bin = "."
+	}
+	var args []string
+	if extra, ok := presets[quality]; ok {
+		args = append(args, extra...)
+	} else {
+		args = append(args, presets["best"]...)
+	}
+	args = append(args, commonArgs...)
+	args = append(args, "--ffmpeg-location", bin)
+	args = append(args, "--js-runtimes", "deno:"+filepath.Join(bin, denoFileName()))
+	args = append(args, "-o", filepath.Join(outputDir, "%(title)s [%(id)s].%(ext)s"))
+	if !playlist {
+		args = append(args, "--no-playlist")
+	}
+	args = append(args, url)
+	return args
 }
 
 func versionKey(value string) []int {

@@ -4,6 +4,7 @@ go 1.24
 
 require (
 	fyne.io/fyne/v2 v2.6.3
+	github.com/ulikunitz/xz v0.5.15
 	golang.org/x/crypto v0.36.0
 )
 

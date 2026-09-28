@@ -2,17 +2,17 @@
 <component type="desktop-application">
   <id>com.abb0r.PiLoad</id>
   <name>PiLoad</name>
-  <summary>Start yt-dlp on a DietPi Raspberry Pi over SSH</summary>
+  <summary>yt-dlp on this computer or on a DietPi Raspberry Pi</summary>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>MIT</project_license>
   <developer_name>abb0r</developer_name>
   <url type="homepage">https://github.com/abb0r/piload</url>
   <description>
-    <p>PiLoad is a desktop app that connects to a Raspberry Pi running DietPi and starts yt-dlp downloads over SSH.</p>
+    <p>PiLoad downloads with yt-dlp on this computer, or on a Raspberry Pi running DietPi over SSH.</p>
   </description>
   <launchable type="desktop-id">com.abb0r.PiLoad.desktop</launchable>
   <releases>
-    <release version="0.3.4" date="2026-09-22"/>
+    <release version="0.4.0" date="2026-09-28"/>
   </releases>
   <content_rating type="oars-1.1"/>
 </component>

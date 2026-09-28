@@ -1,6 +1,6 @@
 # <img src="docs/icon.png" alt="PiLoad" width="36" height="36"> PiLoad
 
-Windows, Linux and macOS (Apple Silicon) program that starts **yt-dlp on a DietPi Raspberry Pi over SSH**.
+Windows, Linux and macOS (Apple Silicon) program that runs **yt-dlp** on this computer, or on a DietPi Raspberry Pi over SSH.
 
 ![PiLoad](docs/piload.png)
 
@@ -10,7 +10,7 @@ Windows, Linux and macOS (Apple Silicon) program that starts **yt-dlp on a DietP
 - [Linux Flatpak](https://github.com/abb0r/piload/releases/latest/download/PiLoad-linux-x86_64.flatpak)
 - [macOS Apple Silicon](https://github.com/abb0r/piload/releases/latest/download/PiLoad-macos-arm64.dmg)
 
-On startup PiLoad checks GitHub for a newer release and asks before updating.
+On startup PiLoad checks GitHub for a newer release and asks before updating. If yt-dlp is already installed for local downloads, that check can also offer a newer yt-dlp. FFmpeg is updated only together with yt-dlp or Deno, and Deno only when it is too old for YouTube.
 
 ### Linux
 
@@ -25,8 +25,15 @@ Open the `.dmg` and drag **PiLoad.app** to Applications.
 
 ## Settings in the app
 
-On the **Settings** tab enter host, port `22`, user (`dietpi`) and a password or key file.
-On the **Download** tab paste one video URL per line, then send them over SSH.
+On the **Download** tab choose **Raspberry Pi** or **This PC**, paste one video URL per line, and start the job.
+
+On the **Settings** tab set the Pi SSH details and the Pi folder, and the folder used on this computer. The local default is Videos on Windows, Movies on macOS, and the Videos user directory on Linux.
+
+The first local download fetches yt-dlp, FFmpeg, ffprobe and Deno if they are missing:
+
+- Windows: `bin` next to `PiLoad.exe`
+- macOS: `~/Library/Application Support/PiLoad/bin`
+- Linux: the app data folder
 
 ## yt-dlp on DietPi
 

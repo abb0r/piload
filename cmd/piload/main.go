@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"time"
 
@@ -21,8 +23,8 @@ import (
 //go:embed icon.png
 var iconPNG []byte
 
-// Version is set at build time with -X main.Version=0.3.4
-var Version = "0.3.4"
+// Version is set at build time with -X main.Version=0.4.0
+var Version = "0.4.0"
 
 const repoURL = "https://github.com/abb0r/piload"
 
@@ -38,21 +40,26 @@ type logLine struct {
 }
 
 type ui struct {
-	win                                            fyne.Window
-	status, notice, profileTip                     *widget.Label
-	queue                                          *widget.Entry
-	queueScroll                                    *container.Scroll
-	urls                                           *widget.Entry
-	host, port, user, keyPath, password, outputDir *widget.Entry
-	savePW, playlist, autoUpdate                   *widget.Check
-	qualityBtns                                    map[string]*widget.Button
-	tabs                                           *container.AppTabs
-	tabQueue                                       *container.TabItem
-	tabSetup                                       *container.TabItem
-	quality                                        string
-	jobs                                           []*job
-	session                                        []logLine
-	ytdlpChecked                                   bool
+	win                                                      fyne.Window
+	status, notice, profileTip                               *widget.Label
+	queue                                                    *widget.Entry
+	queueScroll                                              *container.Scroll
+	urls                                                     *widget.Entry
+	host, port, user, keyPath, password, outputDir, localDir *widget.Entry
+	savePW, playlist, autoUpdate                             *widget.Check
+	target                                                   *widget.RadioGroup
+	goBtn                                                    *widget.Button
+	destHint, toolsLabel                                     *widget.Label
+	qualityBtns                                              map[string]*widget.Button
+	tabs                                                     *container.AppTabs
+	tabQueue                                                 *container.TabItem
+	tabSetup                                                 *container.TabItem
+	quality                                                  string
+	wantLocal                                                bool
+	dismissedYTDLP, dismissedDeno                            string
+	jobs                                                     []*job
+	session                                                  []logLine
+	ytdlpChecked                                             bool
 }
 
 func main() {
@@ -69,6 +76,9 @@ func main() {
 	u := &ui{win: w, quality: "best", qualityBtns: map[string]*widget.Button{}}
 	cfg := loadSettings()
 	u.quality = cfg.Quality
+	u.wantLocal = cfg.Target == "local"
+	u.dismissedYTDLP = cfg.DismissedYTDLP
+	u.dismissedDeno = cfg.DismissedDeno
 	u.build(cfg)
 	w.SetContent(u.layout())
 	if cfg.AutoUpdate {
@@ -78,7 +88,7 @@ func main() {
 }
 
 func (u *ui) build(cfg Settings) {
-	u.status = widget.NewLabel("SSH not tested")
+	u.status = widget.NewLabel("Ready")
 	u.notice = widget.NewLabel("")
 	u.profileTip = widget.NewLabel("")
 	u.profileTip.Wrapping = fyne.TextWrapWord
@@ -93,6 +103,10 @@ func (u *ui) build(cfg Settings) {
 
 	u.outputDir = widget.NewEntry()
 	u.outputDir.SetText(cfg.OutputDir)
+	u.outputDir.OnChanged = func(string) { u.refreshDest() }
+	u.localDir = widget.NewEntry()
+	u.localDir.SetText(cfg.LocalDir)
+	u.localDir.OnChanged = func(string) { u.refreshDest() }
 	u.playlist = widget.NewCheck("Download entire playlist", nil)
 	u.playlist.SetChecked(cfg.Playlist)
 
@@ -110,11 +124,13 @@ func (u *ui) build(cfg Settings) {
 	}
 	u.savePW = widget.NewCheck("Save SSH password", nil)
 	u.savePW.SetChecked(cfg.SavePassword)
-	u.autoUpdate = widget.NewCheck("Check for PiLoad updates on startup", func(bool) {
-		u.persist()
-	})
+	u.autoUpdate = widget.NewCheck("Check for updates on startup", nil)
 	u.autoUpdate.SetChecked(cfg.AutoUpdate)
+	u.autoUpdate.OnChanged = func(bool) { u.persist() }
+	u.toolsLabel = widget.NewLabel("Local tools: checking…")
+	u.toolsLabel.Wrapping = fyne.TextWrapWord
 	u.setProfileTip()
+	u.refreshToolsLabel()
 }
 
 func (u *ui) layout() fyne.CanvasObject {
@@ -141,6 +157,18 @@ func (u *ui) layout() fyne.CanvasObject {
 }
 
 func (u *ui) downloadTab() fyne.CanvasObject {
+	u.target = widget.NewRadioGroup([]string{"Raspberry Pi", "This PC"}, func(sel string) {
+		u.wantLocal = sel == "This PC"
+		u.refreshDest()
+	})
+	u.target.Horizontal = true
+	if u.wantLocal {
+		u.target.SetSelected("This PC")
+	} else {
+		u.target.SetSelected("Raspberry Pi")
+	}
+	u.destHint = widget.NewLabel("")
+	u.destHint.Wrapping = fyne.TextWrapWord
 	row := container.NewHBox()
 	for _, p := range qualityProfiles {
 		p := p
@@ -152,18 +180,20 @@ func (u *ui) downloadTab() fyne.CanvasObject {
 		row.Add(btn)
 	}
 	u.refreshQuality()
-	goBtn := widget.NewButton("Download via SSH", u.startDownload)
-	goBtn.Importance = widget.HighImportance
+	u.goBtn = widget.NewButton("Download via SSH", u.startDownload)
+	u.goBtn.Importance = widget.HighImportance
+	u.refreshDest()
 	return container.NewPadded(container.NewVBox(
+		widget.NewLabel("Download to"),
+		u.target,
+		u.destHint,
 		widget.NewLabel("Video URLs (one per line)"),
 		container.NewGridWrap(fyne.NewSize(900, 120), u.urls),
 		row,
 		u.profileTip,
-		widget.NewLabel("Folder on the Pi"),
-		u.outputDir,
 		u.playlist,
 		u.notice,
-		container.NewBorder(nil, nil, nil, goBtn),
+		container.NewBorder(nil, nil, nil, u.goBtn),
 	))
 }
 
@@ -177,16 +207,30 @@ func (u *ui) setupTab() fyne.CanvasObject {
 	)
 	test := widget.NewButton("Test connection", u.testConnection)
 	save := widget.NewButton("Save settings", u.persist)
+	browse := widget.NewButton("Browse", func() {
+		dialog.ShowFolderOpen(func(uri fyne.ListableURI, err error) {
+			if err != nil || uri == nil {
+				return
+			}
+			u.localDir.SetText(uriPath(uri))
+		}, u.win)
+	})
 	link, _ := url.Parse(repoURL)
 	hyper := widget.NewHyperlink(strings.TrimPrefix(repoURL, "https://"), link)
-	return container.NewPadded(container.NewVBox(
+	body := container.NewVBox(
 		form,
 		u.savePW,
+		widget.NewLabel("Pi folder"),
+		u.outputDir,
+		widget.NewLabel("Local folder"),
+		container.NewBorder(nil, nil, nil, browse, u.localDir),
 		u.autoUpdate,
+		u.toolsLabel,
 		container.NewHBox(test, save),
 		widget.NewLabel("Version "+Version),
 		hyper,
-	))
+	)
+	return container.NewPadded(container.NewVScroll(body))
 }
 
 func (u *ui) refreshQuality() {
@@ -226,18 +270,26 @@ func (u *ui) cfg() sshCfg {
 	}
 }
 
-func (u *ui) persist() {
+func (u *ui) snapshot() Settings {
+	target := "remote"
+	if u.isLocal() {
+		target = "local"
+	}
 	cfg := Settings{
-		Host:         strings.TrimSpace(u.host.Text),
-		Port:         strings.TrimSpace(u.port.Text),
-		User:         strings.TrimSpace(u.user.Text),
-		Auth:         u.cfg().Auth,
-		KeyPath:      strings.TrimSpace(u.keyPath.Text),
-		OutputDir:    strings.TrimSpace(u.outputDir.Text),
-		Quality:      u.quality,
-		Playlist:     u.playlist.Checked,
-		SavePassword: u.savePW.Checked,
-		AutoUpdate:   u.autoUpdate.Checked,
+		Host:           strings.TrimSpace(u.host.Text),
+		Port:           strings.TrimSpace(u.port.Text),
+		User:           strings.TrimSpace(u.user.Text),
+		Auth:           u.cfg().Auth,
+		KeyPath:        strings.TrimSpace(u.keyPath.Text),
+		OutputDir:      strings.TrimSpace(u.outputDir.Text),
+		LocalDir:       strings.TrimSpace(u.localDir.Text),
+		Target:         target,
+		Quality:        u.quality,
+		Playlist:       u.playlist.Checked,
+		SavePassword:   u.savePW.Checked,
+		AutoUpdate:     u.autoUpdate.Checked,
+		DismissedYTDLP: u.dismissedYTDLP,
+		DismissedDeno:  u.dismissedDeno,
 	}
 	if cfg.Port == "" {
 		cfg.Port = "22"
@@ -245,7 +297,11 @@ func (u *ui) persist() {
 	if u.savePW.Checked {
 		cfg.Password = u.password.Text
 	}
-	if err := saveSettings(cfg); err != nil {
+	return cfg
+}
+
+func (u *ui) persist() {
+	if err := saveSettings(u.snapshot()); err != nil {
 		u.status.SetText("error: " + err.Error())
 		return
 	}
@@ -291,7 +347,14 @@ func (u *ui) startDownload() {
 		u.notice.SetText("Please paste at least one video URL.")
 		return
 	}
-	if strings.TrimSpace(u.host.Text) == "" || strings.TrimSpace(u.user.Text) == "" {
+	local := u.isLocal()
+	if local {
+		if strings.TrimSpace(u.localDir.Text) == "" {
+			u.notice.SetText("Choose a local folder in Settings.")
+			u.tabs.Select(u.tabSetup)
+			return
+		}
+	} else if strings.TrimSpace(u.host.Text) == "" || strings.TrimSpace(u.user.Text) == "" {
 		u.notice.SetText("SSH details missing — see Settings.")
 		u.tabs.Select(u.tabSetup)
 		return
@@ -300,6 +363,9 @@ func (u *ui) startDownload() {
 	cfg := u.cfg()
 	quality := u.quality
 	outDir := strings.TrimSpace(u.outputDir.Text)
+	if local {
+		outDir = strings.TrimSpace(u.localDir.Text)
+	}
 	playlist := u.playlist.Checked
 	batch := make([]*job, 0, len(urls))
 	for i, raw := range urls {
@@ -313,11 +379,23 @@ func (u *ui) startDownload() {
 	u.tabs.Select(u.tabQueue)
 	u.urls.SetText("")
 	if len(batch) == 1 {
-		u.notice.SetText("1 job started over SSH.")
+		if local {
+			u.notice.SetText("1 job started on this PC.")
+		} else {
+			u.notice.SetText("1 job started over SSH.")
+		}
+	} else if local {
+		u.notice.SetText(fmt.Sprintf("%d jobs started on this PC.", len(batch)))
 	} else {
 		u.notice.SetText(fmt.Sprintf("%d jobs started over SSH.", len(batch)))
 	}
-	go u.runBatch(cfg, quality, outDir, playlist, batch)
+	go func() {
+		if local {
+			u.runLocalBatch(quality, outDir, playlist, batch)
+			return
+		}
+		u.runBatch(cfg, quality, outDir, playlist, batch)
+	}()
 }
 
 func (u *ui) runBatch(cfg sshCfg, quality, outDir string, playlist bool, batch []*job) {
@@ -436,7 +514,7 @@ func (u *ui) appendLog(text, kind string) {
 
 func (u *ui) renderLog() {
 	if len(u.session) == 0 {
-		u.queue.SetText("No jobs yet.\nProgress appears here once a download is running over SSH.\nSelect text to copy, or use Copy log.")
+		u.queue.SetText("No jobs yet.\nProgress appears here once a download is running.\nSelect text to copy, or use Copy log.")
 		return
 	}
 	var b strings.Builder
@@ -460,60 +538,229 @@ func (u *ui) scrollQueueToEnd() {
 }
 
 func (u *ui) checkAppUpdate() {
+	plan := updatePlan{}
 	tag, exeURL, notes, err := latestAppRelease()
-	if err != nil || tag == "" {
+	if err == nil && tag != "" && exeURL != "" && versionLess(Version, tag) {
+		plan.appTag = tag
+		plan.appURL = exeURL
+		plan.appNotes = notes
+	}
+	tools := planToolUpdate(u.dismissedYTDLP, u.dismissedDeno)
+	plan.ytdlpTo = tools.ytdlpTo
+	plan.ytdlpNotes = tools.ytdlpNotes
+	plan.denoTo = tools.denoTo
+	plan.withFFmpeg = tools.withFFmpeg
+	plan.summary = tools.summary
+	if plan.empty() {
 		return
 	}
-	if !versionLess(Version, tag) {
-		return
-	}
-	fyne.Do(func() {
-		intro := widget.NewLabel(fmt.Sprintf("PiLoad %s is available (you have %s).", tag, Version))
-		intro.Wrapping = fyne.TextWrapWord
-		change := widget.NewLabel(notes)
-		if strings.TrimSpace(notes) == "" {
-			change.SetText("No changelog provided.")
+	fyne.Do(func() { u.confirmUpdate(plan) })
+}
+
+func (u *ui) confirmUpdate(plan updatePlan) {
+	var b strings.Builder
+	if plan.appURL != "" {
+		fmt.Fprintf(&b, "PiLoad %s is available (you have %s).\n\nChangelog\n", plan.appTag, Version)
+		if strings.TrimSpace(plan.appNotes) == "" {
+			b.WriteString("No changelog provided.\n")
+		} else {
+			b.WriteString(plan.appNotes)
+			b.WriteString("\n")
 		}
-		change.Wrapping = fyne.TextWrapWord
-		change.Alignment = fyne.TextAlignLeading
-		scroll := container.NewVScroll(change)
-		scroll.SetMinSize(fyne.NewSize(460, 240))
-		content := container.NewBorder(
-			container.NewVBox(intro, widget.NewLabel("Changelog")),
-			nil, nil, nil, scroll,
-		)
-		dialog.ShowCustomConfirm("Update available", "Update", "Later", content, func(ok bool) {
-			if !ok {
+	}
+	if plan.summary != "" {
+		if b.Len() > 0 {
+			b.WriteString("\n")
+		}
+		b.WriteString(plan.summary)
+	}
+	body := widget.NewLabel(b.String())
+	body.Wrapping = fyne.TextWrapWord
+	scroll := container.NewVScroll(body)
+	scroll.SetMinSize(fyne.NewSize(480, 260))
+	dialog.ShowCustomConfirm("Updates available", "Update", "Later", scroll, func(ok bool) {
+		if !ok {
+			if plan.ytdlpTo != "" {
+				u.dismissedYTDLP = plan.ytdlpTo
+			}
+			if plan.denoTo != "" {
+				u.dismissedDeno = plan.denoTo
+			}
+			_ = saveSettings(u.snapshot())
+			return
+		}
+		u.runUpdatePlan(plan)
+	}, u.win)
+}
+
+func (u *ui) runUpdatePlan(plan updatePlan) {
+	bar := widget.NewProgressBar()
+	label := widget.NewLabel("Preparing update…")
+	prog := dialog.NewCustomWithoutButtons("Updating", container.NewVBox(label, bar), u.win)
+	prog.Show()
+	go func() {
+		set := func(text string, got, total int64) {
+			fyne.Do(func() {
+				label.SetText(text)
+				if total > 0 {
+					bar.SetValue(float64(got) / float64(total))
+				}
+			})
+		}
+		var err error
+		if plan.hasTools() {
+			err = applyToolPlan(plan, func(l string, got, total int64) { set(l, got, total) })
+		}
+		if err == nil && plan.appURL != "" {
+			err = applyUpdate(plan.appURL, func(got, total int64) {
+				text := "Downloading PiLoad…"
+				if total > 0 {
+					text = fmt.Sprintf("Downloading PiLoad… %.0f%%", 100*float64(got)/float64(total))
+				}
+				set(text, got, total)
+			})
+		}
+		fyne.Do(func() {
+			prog.Hide()
+			if err != nil {
+				u.status.SetText("Update failed: " + err.Error())
+				dialog.ShowError(err, u.win)
 				return
 			}
-			bar := widget.NewProgressBar()
-			label := widget.NewLabel("Downloading update…")
-			prog := dialog.NewCustomWithoutButtons("Updating PiLoad", container.NewVBox(label, bar), u.win)
+			if plan.appURL != "" {
+				u.status.SetText("Update installed. Restarting…")
+				time.Sleep(250 * time.Millisecond)
+				u.win.Close()
+				os.Exit(0)
+				return
+			}
+			u.status.SetText("Tools updated")
+			u.refreshToolsLabel()
+		})
+	}()
+}
+
+func (u *ui) isLocal() bool {
+	if u.target != nil && u.target.Selected != "" {
+		return u.target.Selected == "This PC"
+	}
+	return u.wantLocal
+}
+
+func (u *ui) refreshDest() {
+	if u.destHint != nil && u.localDir != nil && u.outputDir != nil {
+		if u.isLocal() {
+			u.destHint.SetText("Saving on this PC to " + strings.TrimSpace(u.localDir.Text))
+		} else {
+			u.destHint.SetText("Saving on the Pi to " + strings.TrimSpace(u.outputDir.Text))
+		}
+	}
+	if u.goBtn != nil {
+		if u.isLocal() {
+			u.goBtn.SetText("Download on this PC")
+		} else {
+			u.goBtn.SetText("Download via SSH")
+		}
+	}
+}
+
+func (u *ui) refreshToolsLabel() {
+	if u.toolsLabel == nil {
+		return
+	}
+	go func() {
+		text := localToolsStatus()
+		fyne.Do(func() { u.toolsLabel.SetText(text) })
+	}()
+}
+
+func uriPath(uri fyne.URI) string {
+	if uri == nil {
+		return ""
+	}
+	p := uri.Path()
+	if runtime.GOOS == "windows" && len(p) >= 3 && p[0] == '/' && p[2] == ':' {
+		p = p[1:]
+	}
+	return filepath.FromSlash(p)
+}
+
+func (u *ui) runLocalBatch(quality, outDir string, playlist bool, batch []*job) {
+	if err := os.MkdirAll(outDir, 0o755); err != nil {
+		fyne.Do(func() { u.appendLog("Could not create folder: "+err.Error(), "error") })
+		return
+	}
+	need := !toolsReady()
+	var prog dialog.Dialog
+	var bar *widget.ProgressBar
+	var label *widget.Label
+	if need {
+		shown := make(chan struct{})
+		fyne.Do(func() {
+			bar = widget.NewProgressBar()
+			label = widget.NewLabel("Preparing local tools…")
+			prog = dialog.NewCustomWithoutButtons("Downloading tools", container.NewVBox(label, bar), u.win)
 			prog.Show()
-			go func() {
-				err := applyUpdate(exeURL, func(got, total int64) {
-					fyne.Do(func() {
-						if total > 0 {
-							bar.SetValue(float64(got) / float64(total))
-							label.SetText(fmt.Sprintf("Downloading update… %.0f%%", 100*float64(got)/float64(total)))
-						} else {
-							label.SetText(fmt.Sprintf("Downloading update… %d KB", got/1024))
-						}
-					})
-				})
-				fyne.Do(func() {
-					prog.Hide()
-					if err != nil {
-						u.status.SetText("Update failed: " + err.Error())
-						dialog.ShowError(err, u.win)
-						return
-					}
-					u.status.SetText("Update installed. Restarting…")
-					time.Sleep(250 * time.Millisecond)
-					u.win.Close()
-					os.Exit(0)
-				})
-			}()
-		}, u.win)
+			close(shown)
+		})
+		<-shown
+	}
+	err := ensureLocalTools(func(text string, got, total int64) {
+		fyne.Do(func() {
+			u.status.SetText(text)
+			if label != nil {
+				if total > 0 {
+					label.SetText(fmt.Sprintf("%s %.0f%%", text, 100*float64(got)/float64(total)))
+					bar.SetValue(float64(got) / float64(total))
+				} else {
+					label.SetText(fmt.Sprintf("%s %d KB", text, got/1024))
+				}
+			}
+		})
 	})
+	if prog != nil {
+		fyne.Do(func() { prog.Hide() })
+	}
+	if err != nil {
+		fyne.Do(func() {
+			u.status.SetText("Tools failed: " + err.Error())
+			u.appendLog("Could not install yt-dlp, FFmpeg or Deno: "+err.Error(), "error")
+		})
+		return
+	}
+	fyne.Do(func() { u.refreshToolsLabel() })
+	for _, j := range batch {
+		j.Status = "running"
+		args := buildLocalArgs(j.URL, quality, outDir, playlist)
+		shown := "yt-dlp " + strings.Join(args, " ")
+		fyne.Do(func() {
+			u.appendLog("", "info")
+			u.appendLog("==> "+j.URL, "ok")
+			u.appendLog(shown, "cmd")
+		})
+		code, err := runLocalYTDLP(args, func(line string) {
+			kind := classifyLine(line)
+			if m := progressRE.FindStringSubmatch(line); len(m) > 1 {
+				var p float64
+				fmt.Sscanf(m[1], "%f", &p)
+				if int(p) < 99 {
+					j.Progress = int(p)
+				} else {
+					j.Progress = 99
+				}
+			}
+			fyne.Do(func() { u.appendLog(line, kind) })
+		})
+		if err != nil {
+			j.Status = "error"
+			fyne.Do(func() { u.appendLog(err.Error(), "error") })
+		} else if code == 0 {
+			j.Status = "done"
+			j.Progress = 100
+			fyne.Do(func() { u.appendLog("finished", "ok") })
+		} else {
+			j.Status = "error"
+			fyne.Do(func() { u.appendLog(fmt.Sprintf("yt-dlp exit %d", code), "error") })
+		}
+	}
 }
