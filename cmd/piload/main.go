@@ -23,10 +23,12 @@ import (
 //go:embed icon.png
 var iconPNG []byte
 
-// Version is set at build time with -X main.Version=0.4.2
-var Version = "0.4.2"
+// Version is set at build time with -X main.Version=0.4.3
+var Version = "0.4.3"
 
 const repoURL = "https://github.com/abb0r/piload"
+const maxLogLines = 500
+const logTrimNote = "… earlier output was trimmed …"
 
 var progressRE = regexp.MustCompile(`(\d+(?:\.\d+)?)%`)
 
@@ -60,6 +62,8 @@ type ui struct {
 	dismissedYTDLP, dismissedDeno                            string
 	jobs                                                     []*job
 	session                                                  []logLine
+	lastLogRender                                            time.Time
+	logFlushPending                                          bool
 	ytdlpChecked                                             bool
 }
 
@@ -512,34 +516,81 @@ func classifyLine(line string) string {
 	}
 }
 
+func isLiveLine(line string) bool {
+	s := strings.TrimSpace(line)
+	if !strings.HasPrefix(s, "[download]") {
+		return false
+	}
+	return strings.Contains(s, "%") || strings.Contains(s, "fragment")
+}
+
 func (u *ui) appendLog(text, kind string) {
-	u.session = append(u.session, logLine{Text: text, Kind: kind})
+	live := isLiveLine(text)
+	if live && len(u.session) > 0 && u.session[len(u.session)-1].Kind == "live" {
+		u.session[len(u.session)-1].Text = text
+	} else {
+		if live {
+			kind = "live"
+		}
+		u.session = append(u.session, logLine{Text: text, Kind: kind})
+		u.trimLog()
+	}
+	if live && time.Since(u.lastLogRender) < 250*time.Millisecond {
+		u.armLogFlush()
+		return
+	}
 	u.renderLog()
 }
 
+func (u *ui) armLogFlush() {
+	if u.logFlushPending {
+		return
+	}
+	u.logFlushPending = true
+	time.AfterFunc(250*time.Millisecond, func() {
+		fyne.Do(func() {
+			u.logFlushPending = false
+			u.renderLog()
+		})
+	})
+}
+
+func (u *ui) trimLog() {
+	if len(u.session) <= maxLogLines {
+		return
+	}
+	extra := len(u.session) - maxLogLines + 1
+	rest := u.session[extra:]
+	if len(rest) > 0 && rest[0].Text == logTrimNote {
+		u.session = rest
+		return
+	}
+	trimmed := make([]logLine, 0, len(rest)+1)
+	trimmed = append(trimmed, logLine{Text: logTrimNote, Kind: "info"})
+	u.session = append(trimmed, rest...)
+}
+
 func (u *ui) renderLog() {
+	u.lastLogRender = time.Now()
 	if len(u.session) == 0 {
 		u.queue.SetText("No jobs yet.\nProgress appears here once a download is running.\nSelect text to copy, or use Copy log.")
 		return
 	}
 	var b strings.Builder
+	b.Grow(len(u.session) * 80)
 	for i, line := range u.session {
 		if i > 0 {
 			b.WriteByte('\n')
 		}
 		b.WriteString(line.Text)
 	}
-	u.queue.SetText(b.String())
-	u.scrollQueueToEnd()
-}
-
-// The log is a multiline entry, which scrolls itself. The outer container
-// cannot move that inner view, so the cursor is placed past the last row.
-// Fyne then clamps the scroll offset to the bottom.
-func (u *ui) scrollQueueToEnd() {
-	u.queue.CursorRow = strings.Count(u.queue.Text, "\n") + 100000
+	text := b.String()
+	if u.queue.Text == text {
+		return
+	}
+	u.queue.CursorRow = strings.Count(text, "\n") + 100000
 	u.queue.CursorColumn = 0
-	u.queue.Refresh()
+	u.queue.SetText(text)
 }
 
 func (u *ui) checkAppUpdate() {

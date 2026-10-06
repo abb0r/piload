@@ -12,7 +12,7 @@
   </description>
   <launchable type="desktop-id">com.abb0r.PiLoad.desktop</launchable>
   <releases>
-    <release version="0.4.2" date="2026-09-28"/>
+    <release version="0.4.3" date="2026-10-06"/>
   </releases>
   <content_rating type="oars-1.1"/>
 </component>

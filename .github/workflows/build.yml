@@ -9,7 +9,7 @@ permissions:
   contents: write
 
 env:
-  APP_VERSION: "0.4.2"
+  APP_VERSION: "0.4.3"
 
 jobs:
   windows:
@@ -134,8 +134,7 @@ jobs:
             --target main \
             --title "PiLoad ${APP_VERSION}" \
             --notes "$(cat <<'EOF'
-          Settings lists the installed PiLoad, yt-dlp, FFmpeg and Deno versions.
-          The last choice of Local or Raspberry Pi is remembered.
+          The queue keeps one updating progress line instead of every yt-dlp tick, and trims older output so long runs stay responsive.
 
           - Windows: `PiLoad.exe`
           - Linux: `PiLoad-linux-x86_64.flatpak`
